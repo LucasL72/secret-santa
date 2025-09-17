@@ -39,17 +39,44 @@ function EventWizard({ creator, onCancel = () => {}, onComplete }) {
   const handleConfirm = async () => {
     setSubmission({ loading: true, error: '' });
     try {
-      const payload = {
-        ...details,
-        budget: Number(details.budget),
+      const normalizedBudget = (() => {
+        const rawBudget = String(details.budget ?? '').trim();
+        if (!rawBudget) {
+          return null;
+        }
+        const parsedBudget = Number(rawBudget);
+        return Number.isFinite(parsedBudget) ? parsedBudget : null;
+      })();
+      const requestPayload = {
+        name: String(details.title || '').trim(),
+        eventDate: details.deadline || null,
+        budget: normalizedBudget,
+        location: String(details.location || '').trim() || null,
         participants,
         creatorId: creator?.id || null,
         creatorEmail: creator?.email || null,
       };
-      const response = await createEvent(payload);
+      const response = await createEvent(requestPayload);
+      const eventData = response?.event || {};
+      const summaryParticipants = Array.isArray(eventData.participants)
+        ? eventData.participants
+        : participants;
       setSubmission({ loading: false, error: '' });
       if (onComplete) {
-        onComplete({ ...payload, ...response });
+        onComplete({
+          title: details.title,
+          deadline: details.deadline,
+          budget: eventData.budget ?? normalizedBudget,
+          location: eventData.location ?? details.location,
+          participants: summaryParticipants,
+          creatorId: requestPayload.creatorId,
+          creatorEmail: requestPayload.creatorEmail,
+          name: eventData.name ?? requestPayload.name,
+          eventDate: eventData.eventDate ?? requestPayload.eventDate,
+          description: eventData.description ?? null,
+          id: eventData.id ?? null,
+          event: eventData,
+        });
       }
     } catch (error) {
       setSubmission({
