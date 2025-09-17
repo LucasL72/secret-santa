@@ -24,6 +24,11 @@ Family Link Secret Santa est une application complète permettant d'organiser un
    npm install
    ```
    Les dépendances (React 19, Bootstrap empaqueté localement, Sass) sont fournies via les packages inclus dans le dossier `packages/`.
+2. Toujours dans `web/`, copiez le fichier `.env.example` afin de créer votre configuration locale :
+   ```bash
+   cp .env.example .env
+   ```
+   Ajustez ensuite `REACT_APP_API_BASE_URL` si votre API tourne sur un autre hôte ou port.
 
 ## Lancement et scripts
 ### Backend
@@ -32,7 +37,7 @@ Family Link Secret Santa est une application complète permettant d'organiser un
   cd app
   PORT=4000 npm start
   ```
-  Par défaut l'API écoute sur le port `3000`. Fixer `PORT=4000` permet d'être aligné avec la configuration du frontend (`REACT_APP_API_BASE_URL`).
+  Par défaut l'API écoute sur le port `3000`. Fixer `PORT=4000` évite le conflit avec le serveur de développement React ; pensez alors à mettre à jour `REACT_APP_API_BASE_URL` dans votre `.env`.
 - **Développement avec rechargement** (si `nodemon` est disponible) :
   ```bash
   cd app
@@ -60,11 +65,11 @@ Family Link Secret Santa est une application complète permettant d'organiser un
 ## Variables d'environnement
 | Variable | Portée | Valeur par défaut | Description |
 | --- | --- | --- | --- |
-| `PORT` | Backend | `3000` | Port HTTP de l'API. Utilisez `4000` pour correspondre à la configuration frontend par défaut. |
+| `PORT` | Backend | `3000` | Port HTTP de l'API. Vous pouvez utiliser `4000` pour éviter un conflit avec le frontend (mettez alors à jour `REACT_APP_API_BASE_URL`). |
 | `JWT_SECRET` | Backend | `development-secret` | Secret utilisé pour signer les tokens JWT des créateurs. |
 | `MAIL_SENDER` | Backend | `secret-santa@example.com` | Adresse d'expéditeur affichée dans les e-mails simulés. |
 | `MAIL_SUBJECT` | Backend | `Votre tirage Secret Santa` | Sujet des notifications envoyées aux participants. |
-| `REACT_APP_API_BASE_URL` | Frontend | `http://localhost:4000/api` | URL de base des appels REST. Ajustez-la si l'API tourne sur un autre hôte/port. |
+| `REACT_APP_API_BASE_URL` | Frontend | `http://localhost:3000/api` | URL de base des appels REST. Ajustez-la si l'API tourne sur un autre hôte/port (par exemple `http://localhost:4000/api` si l'API écoute sur 4000). |
 
 ## Architecture
 Le projet est structuré en deux sous-répertoires indépendants :
