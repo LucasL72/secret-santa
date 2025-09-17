@@ -176,6 +176,19 @@ function querySql(sql, params = []) {
   return runSql(sql, params, { expectRows: true });
 }
 
+function ensureColumnExists(tableName, columnName, columnDefinition) {
+  try {
+    const columns = querySql(`PRAGMA table_info(${tableName})`);
+    const hasColumn = columns.some((column) => column.name === columnName);
+    if (!hasColumn) {
+      executeSql(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnDefinition}`);
+    }
+  } catch (error) {
+    console.error(`[Database] Unable to ensure column ${columnName} on ${tableName}:`, error);
+    throw error;
+  }
+}
+
 function initializeDatabase() {
   executeSql(
     `CREATE TABLE IF NOT EXISTS users (
@@ -194,11 +207,16 @@ function initializeDatabase() {
       name TEXT NOT NULL,
       description TEXT,
       event_date TEXT,
+      budget REAL,
+      location TEXT,
       draw_generated INTEGER DEFAULT 0,
       created_at TEXT NOT NULL,
       FOREIGN KEY(owner_id) REFERENCES users(id)
     )`
   );
+
+  ensureColumnExists('events', 'budget', 'REAL');
+  ensureColumnExists('events', 'location', 'TEXT');
 
   executeSql(
     `CREATE TABLE IF NOT EXISTS participants (
@@ -490,6 +508,8 @@ function validateParticipants(participants) {
 async function createEvent(req, res) {
   const name = String(req.body.name || '').trim();
   const description = String(req.body.description || '').trim() || null;
+  const rawBudget = String(req.body.budget ?? '').trim();
+  const location = String(req.body.location || '').trim();
   let eventDate = null;
   if (req.body.eventDate) {
     const parsedDate = new Date(req.body.eventDate);
@@ -503,16 +523,26 @@ async function createEvent(req, res) {
   if (!name) {
     return sendBadRequest(res, "Le nom de l'évènement est obligatoire");
   }
+  if (!rawBudget) {
+    return sendBadRequest(res, 'Le budget maximum est obligatoire.');
+  }
+  const budget = Number(rawBudget);
+  if (!Number.isFinite(budget) || budget <= 0) {
+    return sendBadRequest(res, 'Le budget doit être un montant positif.');
+  }
+  if (!location) {
+    return sendBadRequest(res, 'Le lieu de l’évènement est obligatoire.');
+  }
   if (!validation.valid) {
     return sendBadRequest(res, validation.error);
   }
 
   const createdAt = new Date().toISOString();
   const eventInsert = querySql(
-    `INSERT INTO events (owner_id, name, description, event_date, created_at)
-     VALUES (@p0, @p1, @p2, @p3, @p4)
+    `INSERT INTO events (owner_id, name, description, event_date, budget, location, created_at)
+     VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6)
      RETURNING id`,
-    [req.user.userId, name, description, eventDate, createdAt]
+    [req.user.userId, name, description, eventDate, budget, location, createdAt]
   );
   const eventId = eventInsert[0]?.id;
 
@@ -530,6 +560,8 @@ async function createEvent(req, res) {
       name,
       description,
       eventDate,
+      budget,
+      location,
       createdAt,
       participants: validation.participants,
     },
@@ -620,7 +652,7 @@ async function getEventStatus(req, res) {
   }
   const events = querySql(
     `SELECT id, owner_id as ownerId, name, description, event_date as eventDate,
-            draw_generated as drawGenerated, created_at as createdAt
+            budget, location, draw_generated as drawGenerated, created_at as createdAt
      FROM events WHERE id = @p0`,
     [eventId]
   );
@@ -643,7 +675,7 @@ function getEventForOwner(eventId, ownerId) {
   }
   const events = querySql(
     `SELECT id, owner_id as ownerId, name, description, event_date as eventDate,
-            draw_generated as drawGenerated, created_at as createdAt
+            budget, location, draw_generated as drawGenerated, created_at as createdAt
      FROM events WHERE id = @p0`,
     [eventId]
   );
