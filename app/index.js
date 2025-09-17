@@ -1,21 +1,39 @@
+require('dotenv').config();
+
 const http = require('http');
 const url = require('url');
-const path = require('path');
-const fs = require('fs');
 const crypto = require('crypto');
-const { spawnSync } = require('child_process');
+const mysql = require('mysql2/promise');
 
 // ---- Configuration -------------------------------------------------------
-const PORT = process.env.PORT || 3000;
-const DATA_DIR = path.join(__dirname, 'data');
-const DB_FILE = path.join(DATA_DIR, 'secret-santa.sqlite');
+function parseInteger(value, defaultValue) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isNaN(parsed) ? defaultValue : parsed;
+}
+
+const PORT = parseInteger(process.env.PORT, 3000);
 const JWT_SECRET = process.env.JWT_SECRET || 'development-secret';
 const EMAIL_SENDER = process.env.MAIL_SENDER || 'secret-santa@example.com';
 const EMAIL_SUBJECT = process.env.MAIL_SUBJECT || 'Votre tirage Secret Santa';
+const MYSQL_HOST = process.env.MYSQL_HOST || 'localhost';
+const MYSQL_PORT = parseInteger(process.env.MYSQL_PORT, 3306);
+const MYSQL_USER = process.env.MYSQL_USER || 'root';
+const MYSQL_PASSWORD = process.env.MYSQL_PASSWORD || '';
+const MYSQL_DATABASE = process.env.MYSQL_DATABASE || 'secret_santa';
+const MYSQL_CONNECTION_LIMIT = parseInteger(process.env.MYSQL_CONNECTION_LIMIT, 10);
 
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-}
+const pool = mysql.createPool({
+  host: MYSQL_HOST,
+  port: MYSQL_PORT,
+  user: MYSQL_USER,
+  password: MYSQL_PASSWORD,
+  database: MYSQL_DATABASE,
+  waitForConnections: true,
+  connectionLimit: MYSQL_CONNECTION_LIMIT,
+  queueLimit: 0,
+  dateStrings: true,
+  decimalNumbers: true,
+});
 
 // ---- Utility helpers -----------------------------------------------------
 function base64UrlEncode(input) {
@@ -120,123 +138,134 @@ function sendServerError(res, error) {
   respondJson(res, 500, { error: 'Internal server error' });
 }
 
-// ---- SQLite wrapper ------------------------------------------------------
-function formatSqlParameter(value) {
+// ---- MySQL helpers -------------------------------------------------------
+function formatDateTime(value) {
+  if (!value) {
+    return null;
+  }
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  return date.toISOString().slice(0, 19).replace('T', ' ');
+}
+
+function nowDateTime() {
+  return formatDateTime(new Date());
+}
+
+function toIsoString(value) {
   if (value === null || value === undefined) {
-    return 'NULL';
+    return null;
   }
-  if (typeof value === 'number') {
-    return value;
+  if (value instanceof Date) {
+    return value.toISOString();
   }
-  if (typeof value === 'boolean') {
-    return value ? 1 : 0;
-  }
-  const text = String(value).replace(/'/g, "''");
-  return `'${text}'`;
-}
-
-function runSql(sql, params = [], { expectRows = false } = {}) {
-  const statements = ['.mode json', '.parameter init'];
-  params.forEach((value, index) => {
-    statements.push(`.parameter set @p${index} ${formatSqlParameter(value)}`);
-  });
-  statements.push(sql.trim().endsWith(';') ? sql.trim() : `${sql.trim()};`);
-  const command = statements.join('\n');
-  const result = spawnSync('sqlite3', [DB_FILE], {
-    input: `${command}\n`,
-    encoding: 'utf-8',
-  });
-  if (result.status !== 0) {
-    const message = result.stderr || result.stdout || 'SQLite error';
-    throw new Error(message.trim());
-  }
-  if (!expectRows) {
-    return [];
-  }
-  const output = (result.stdout || '').trim();
-  if (!output) {
-    return [];
-  }
-  const lines = output.split(/\r?\n/).filter(Boolean);
-  if (lines.length === 0) {
-    return [];
-  }
-  const jsonString = lines.join('');
-  if (!jsonString) {
-    return [];
-  }
-  return JSON.parse(jsonString);
-}
-
-function executeSql(sql, params = []) {
-  return runSql(sql, params, { expectRows: false });
-}
-
-function querySql(sql, params = []) {
-  return runSql(sql, params, { expectRows: true });
-}
-
-function ensureColumnExists(tableName, columnName, columnDefinition) {
-  try {
-    const columns = querySql(`PRAGMA table_info(${tableName})`);
-    const hasColumn = columns.some((column) => column.name === columnName);
-    if (!hasColumn) {
-      executeSql(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnDefinition}`);
+  if (typeof value === 'string' && value.trim() !== '') {
+    const normalized = value.includes('T') ? value : value.replace(' ', 'T');
+    const withTimezone = normalized.endsWith('Z') ? normalized : `${normalized}Z`;
+    const date = new Date(withTimezone);
+    if (!Number.isNaN(date.getTime())) {
+      return date.toISOString();
     }
+  }
+  return value;
+}
+
+function normalizeEventRow(row) {
+  if (!row) {
+    return null;
+  }
+  return {
+    ...row,
+    eventDate: toIsoString(row.eventDate),
+    createdAt: toIsoString(row.createdAt),
+  };
+}
+
+function normalizeParticipantRow(row) {
+  if (!row) {
+    return null;
+  }
+  return {
+    ...row,
+    emailSentAt: toIsoString(row.emailSentAt),
+    createdAt: toIsoString(row.createdAt),
+  };
+}
+
+async function runSql(sql, params = [], { expectRows = false } = {}) {
+  const trimmedSql = sql.trim();
+  const normalizedSql = trimmedSql.endsWith(';')
+    ? trimmedSql.slice(0, trimmedSql.length - 1)
+    : trimmedSql;
+  const queryParams = Array.isArray(params) ? params : [];
+  try {
+    const [rows] = await pool.execute(normalizedSql, queryParams);
+    if (expectRows) {
+      return Array.isArray(rows) ? rows : [];
+    }
+    return rows;
   } catch (error) {
-    console.error(`[Database] Unable to ensure column ${columnName} on ${tableName}:`, error);
+    console.error('[Database] Error executing query:', error);
     throw error;
   }
 }
 
-function initializeDatabase() {
-  executeSql(
-    `CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      email TEXT NOT NULL UNIQUE,
-      password_hash TEXT NOT NULL,
-      password_salt TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    )`
-  );
-
-  executeSql(
-    `CREATE TABLE IF NOT EXISTS events (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      owner_id INTEGER NOT NULL,
-      name TEXT NOT NULL,
-      description TEXT,
-      event_date TEXT,
-      budget REAL,
-      location TEXT,
-      draw_generated INTEGER DEFAULT 0,
-      created_at TEXT NOT NULL,
-      FOREIGN KEY(owner_id) REFERENCES users(id)
-    )`
-  );
-
-  ensureColumnExists('events', 'budget', 'REAL');
-  ensureColumnExists('events', 'location', 'TEXT');
-
-  executeSql(
-    `CREATE TABLE IF NOT EXISTS participants (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      event_id INTEGER NOT NULL,
-      name TEXT NOT NULL,
-      email TEXT NOT NULL,
-      assigned_recipient_id INTEGER,
-      email_status TEXT DEFAULT 'pending',
-      email_error TEXT,
-      email_sent_at TEXT,
-      created_at TEXT NOT NULL,
-      UNIQUE(event_id, email),
-      FOREIGN KEY(event_id) REFERENCES events(id),
-      FOREIGN KEY(assigned_recipient_id) REFERENCES participants(id)
-    )`
-  );
+async function executeSql(sql, params = []) {
+  return runSql(sql, params, { expectRows: false });
 }
 
-initializeDatabase();
+async function querySql(sql, params = []) {
+  return runSql(sql, params, { expectRows: true });
+}
+
+async function initializeDatabase() {
+  await executeSql(
+    `CREATE TABLE IF NOT EXISTS users (
+      id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+      email VARCHAR(255) NOT NULL UNIQUE,
+      password_hash VARCHAR(255) NOT NULL,
+      password_salt VARCHAR(255) NOT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+  );
+
+  await executeSql(
+    `CREATE TABLE IF NOT EXISTS events (
+      id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+      owner_id INT UNSIGNED NOT NULL,
+      name VARCHAR(255) NOT NULL,
+      description TEXT NULL,
+      event_date DATETIME NULL,
+      budget DECIMAL(10, 2) NULL,
+      location VARCHAR(255) NULL,
+      draw_generated TINYINT(1) NOT NULL DEFAULT 0,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      CONSTRAINT fk_events_owner FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+  );
+
+  await executeSql(
+    `CREATE TABLE IF NOT EXISTS participants (
+      id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+      event_id INT UNSIGNED NOT NULL,
+      name VARCHAR(255) NOT NULL,
+      email VARCHAR(255) NOT NULL,
+      assigned_recipient_id INT UNSIGNED NULL,
+      email_status VARCHAR(50) NOT NULL DEFAULT 'pending',
+      email_error TEXT NULL,
+      email_sent_at DATETIME NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY unique_participant_email (event_id, email),
+      CONSTRAINT fk_participants_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
+      CONSTRAINT fk_participants_recipient FOREIGN KEY (assigned_recipient_id) REFERENCES participants(id) ON DELETE SET NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+  );
+}
 
 // ---- Email sending -------------------------------------------------------
 async function sendEmail(to, subject, body) {
@@ -439,22 +468,24 @@ async function registerUser(req, res) {
     return sendBadRequest(res, 'Le mot de passe doit contenir au moins 8 caractères');
   }
 
-  const existing = querySql('SELECT id FROM users WHERE email = @p0', [email]);
+  const existing = await querySql('SELECT id FROM users WHERE email = ?', [email]);
   if (existing.length > 0) {
     return sendBadRequest(res, 'Un compte existe déjà pour cette adresse email');
   }
 
   const { salt, hash } = hashPassword(password);
-  const createdAt = new Date().toISOString();
-  const insertResult = querySql(
+  const createdAt = nowDateTime();
+  const insertResult = await executeSql(
     `INSERT INTO users (email, password_hash, password_salt, created_at)
-     VALUES (@p0, @p1, @p2, @p3)
-     RETURNING id`,
+     VALUES (?, ?, ?, ?)`,
     [email, hash, salt, createdAt]
   );
-  const userId = insertResult[0]?.id;
+  const userId = insertResult.insertId;
   const token = signJwt({ userId, email });
-  respondJson(res, 201, { token, user: { id: userId, email } });
+  respondJson(res, 201, {
+    token,
+    user: { id: userId, email },
+  });
 }
 
 async function loginUser(req, res) {
@@ -465,8 +496,8 @@ async function loginUser(req, res) {
     return sendBadRequest(res, 'Identifiants manquants');
   }
 
-  const users = querySql(
-    'SELECT id, password_hash as passwordHash, password_salt as passwordSalt FROM users WHERE email = @p0',
+  const users = await querySql(
+    'SELECT id, password_hash as passwordHash, password_salt as passwordSalt FROM users WHERE email = ?',
     [email]
   );
   if (users.length === 0) {
@@ -516,7 +547,7 @@ async function createEvent(req, res) {
     if (Number.isNaN(parsedDate.getTime())) {
       return sendBadRequest(res, 'Date de l\'évènement invalide');
     }
-    eventDate = parsedDate.toISOString();
+    eventDate = formatDateTime(parsedDate);
   }
   const validation = validateParticipants(req.body.participants);
 
@@ -537,32 +568,31 @@ async function createEvent(req, res) {
     return sendBadRequest(res, validation.error);
   }
 
-  const createdAt = new Date().toISOString();
-  const eventInsert = querySql(
+  const createdAt = nowDateTime();
+  const eventInsert = await executeSql(
     `INSERT INTO events (owner_id, name, description, event_date, budget, location, created_at)
-     VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6)
-     RETURNING id`,
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
     [req.user.userId, name, description, eventDate, budget, location, createdAt]
   );
-  const eventId = eventInsert[0]?.id;
+  const eventId = eventInsert.insertId;
 
-  validation.participants.forEach((participant) => {
-    executeSql(
+  for (const participant of validation.participants) {
+    await executeSql(
       `INSERT INTO participants (event_id, name, email, created_at)
-       VALUES (@p0, @p1, @p2, @p3)` ,
+       VALUES (?, ?, ?, ?)` ,
       [eventId, participant.name, participant.email, createdAt]
     );
-  });
+  }
 
   respondJson(res, 201, {
     event: {
       id: eventId,
       name,
       description,
-      eventDate,
+      eventDate: toIsoString(eventDate),
       budget,
       location,
-      createdAt,
+      createdAt: toIsoString(createdAt),
       participants: validation.participants,
     },
   });
@@ -593,8 +623,8 @@ async function triggerDraw(req, res) {
   if (!eventId) {
     return sendBadRequest(res, 'Identifiant évènement invalide');
   }
-  const events = querySql(
-    'SELECT id, owner_id as ownerId, name FROM events WHERE id = @p0',
+  const events = await querySql(
+    'SELECT id, owner_id as ownerId, name FROM events WHERE id = ?',
     [eventId]
   );
   if (events.length === 0 || events[0].ownerId !== req.user.userId) {
@@ -602,42 +632,46 @@ async function triggerDraw(req, res) {
   }
   const event = events[0];
 
-  const participants = querySql(
-    `SELECT id, name, email, email_status as emailStatus, assigned_recipient_id as assignedRecipientId
-     FROM participants WHERE event_id = @p0`,
-    [eventId]
-  );
+  const participants = (
+    await querySql(
+      `SELECT id, name, email, email_status as emailStatus, email_error as emailError,
+              email_sent_at as emailSentAt, created_at as createdAt,
+              assigned_recipient_id as assignedRecipientId
+       FROM participants WHERE event_id = ?`,
+      [eventId]
+    )
+  ).map(normalizeParticipantRow);
   if (participants.length < 2) {
     return sendBadRequest(res, 'Ajoutez au moins deux participants avant de lancer le tirage');
   }
 
   const assignments = buildAssignments(participants);
-  const now = new Date().toISOString();
+  const now = nowDateTime();
   const summary = [];
 
   for (const pair of assignments) {
     const message = `Bonjour ${pair.giver.name},\n\nVous offrirez un cadeau à ${pair.receiver.name} (${pair.receiver.email}).\nBonne préparation !`;
     try {
       await sendEmail(pair.giver.email, EMAIL_SUBJECT, message);
-      executeSql(
+      await executeSql(
         `UPDATE participants
-         SET assigned_recipient_id = @p0, email_status = 'sent', email_error = NULL, email_sent_at = @p1
-         WHERE id = @p2`,
+         SET assigned_recipient_id = ?, email_status = 'sent', email_error = NULL, email_sent_at = ?
+         WHERE id = ?`,
         [pair.receiver.id, now, pair.giver.id]
       );
       summary.push({ participantId: pair.giver.id, status: 'sent' });
     } catch (error) {
-      executeSql(
+      await executeSql(
         `UPDATE participants
-         SET assigned_recipient_id = @p0, email_status = 'failed', email_error = @p1, email_sent_at = @p2
-         WHERE id = @p3`,
+         SET assigned_recipient_id = ?, email_status = 'failed', email_error = ?, email_sent_at = ?
+         WHERE id = ?`,
         [pair.receiver.id, String(error), now, pair.giver.id]
       );
       summary.push({ participantId: pair.giver.id, status: 'failed', error: String(error) });
     }
   }
 
-  executeSql('UPDATE events SET draw_generated = 1 WHERE id = @p0', [eventId]);
+  await executeSql('UPDATE events SET draw_generated = 1 WHERE id = ?', [eventId]);
 
   respondJson(res, 200, {
     event: { id: event.id, name: event.name },
@@ -650,33 +684,36 @@ async function getEventStatus(req, res) {
   if (!eventId) {
     return sendBadRequest(res, 'Identifiant évènement invalide');
   }
-  const events = querySql(
+  const events = await querySql(
     `SELECT id, owner_id as ownerId, name, description, event_date as eventDate,
             budget, location, draw_generated as drawGenerated, created_at as createdAt
-     FROM events WHERE id = @p0`,
+     FROM events WHERE id = ?`,
     [eventId]
   );
   if (events.length === 0 || events[0].ownerId !== req.user.userId) {
     return sendNotFound(res, "Évènement introuvable");
   }
-  const event = events[0];
-  const participants = querySql(
-    `SELECT id, name, email, email_status as emailStatus, email_error as emailError,
-            email_sent_at as emailSentAt, assigned_recipient_id as assignedRecipientId
-     FROM participants WHERE event_id = @p0`,
-    [eventId]
-  );
+  const event = normalizeEventRow(events[0]);
+  const participants = (
+    await querySql(
+      `SELECT id, name, email, email_status as emailStatus, email_error as emailError,
+              email_sent_at as emailSentAt, created_at as createdAt,
+              assigned_recipient_id as assignedRecipientId
+       FROM participants WHERE event_id = ?`,
+      [eventId]
+    )
+  ).map(normalizeParticipantRow);
   respondJson(res, 200, { event, participants });
 }
 
-function getEventForOwner(eventId, ownerId) {
+async function getEventForOwner(eventId, ownerId) {
   if (!eventId) {
     return null;
   }
-  const events = querySql(
+  const events = await querySql(
     `SELECT id, owner_id as ownerId, name, description, event_date as eventDate,
             budget, location, draw_generated as drawGenerated, created_at as createdAt
-     FROM events WHERE id = @p0`,
+     FROM events WHERE id = ?`,
     [eventId]
   );
   if (events.length === 0) {
@@ -686,34 +723,36 @@ function getEventForOwner(eventId, ownerId) {
   if (event.ownerId !== ownerId) {
     return null;
   }
-  return event;
+  return normalizeEventRow(event);
 }
 
-function getParticipantForEventById(eventId, participantId) {
+async function getParticipantForEventById(eventId, participantId) {
   if (!participantId) {
     return null;
   }
-  const participants = querySql(
+  const participants = await querySql(
     `SELECT id, name, email, email_status as emailStatus, email_error as emailError,
-            email_sent_at as emailSentAt, assigned_recipient_id as assignedRecipientId
-     FROM participants WHERE event_id = @p0 AND id = @p1`,
+            email_sent_at as emailSentAt, created_at as createdAt,
+            assigned_recipient_id as assignedRecipientId
+     FROM participants WHERE event_id = ? AND id = ?`,
     [eventId, participantId]
   );
-  return participants[0] || null;
+  return normalizeParticipantRow(participants[0]) || null;
 }
 
-function getParticipantForEventByEmail(eventId, participantEmail) {
+async function getParticipantForEventByEmail(eventId, participantEmail) {
   const email = sanitizeEmail(participantEmail);
   if (!email) {
     return null;
   }
-  const participants = querySql(
+  const participants = await querySql(
     `SELECT id, name, email, email_status as emailStatus, email_error as emailError,
-            email_sent_at as emailSentAt, assigned_recipient_id as assignedRecipientId
-     FROM participants WHERE event_id = @p0 AND email = @p1`,
+            email_sent_at as emailSentAt, created_at as createdAt,
+            assigned_recipient_id as assignedRecipientId
+     FROM participants WHERE event_id = ? AND email = ?`,
     [eventId, email]
   );
-  return participants[0] || null;
+  return normalizeParticipantRow(participants[0]) || null;
 }
 
 async function listEventNotifications(req, res) {
@@ -721,17 +760,20 @@ async function listEventNotifications(req, res) {
   if (!eventId) {
     return sendBadRequest(res, 'Identifiant évènement invalide');
   }
-  const event = getEventForOwner(eventId, req.user.userId);
+  const event = await getEventForOwner(eventId, req.user.userId);
   if (!event) {
     return sendNotFound(res, "Évènement introuvable");
   }
-  const notifications = querySql(
-    `SELECT id, name, email, email_status as emailStatus, email_error as emailError,
-            email_sent_at as emailSentAt, assigned_recipient_id as assignedRecipientId
-     FROM participants WHERE event_id = @p0
-     ORDER BY created_at ASC`,
-    [eventId]
-  );
+  const notifications = (
+    await querySql(
+      `SELECT id, name, email, email_status as emailStatus, email_error as emailError,
+              email_sent_at as emailSentAt, created_at as createdAt,
+              assigned_recipient_id as assignedRecipientId
+       FROM participants WHERE event_id = ?
+       ORDER BY created_at ASC`,
+      [eventId]
+    )
+  ).map(normalizeParticipantRow);
   respondJson(res, 200, { event: { id: event.id, name: event.name }, notifications });
 }
 
@@ -741,11 +783,11 @@ async function acknowledgeNotification(req, res) {
   if (!eventId || !participantId) {
     return sendBadRequest(res, 'Identifiants de notification invalides');
   }
-  const event = getEventForOwner(eventId, req.user.userId);
+  const event = await getEventForOwner(eventId, req.user.userId);
   if (!event) {
     return sendNotFound(res, "Évènement introuvable");
   }
-  const participant = getParticipantForEventById(eventId, participantId);
+  const participant = await getParticipantForEventById(eventId, participantId);
   if (!participant) {
     return sendNotFound(res, 'Notification introuvable');
   }
@@ -753,8 +795,8 @@ async function acknowledgeNotification(req, res) {
   if (!status) {
     return sendBadRequest(res, 'Statut de notification manquant');
   }
-  executeSql(
-    `UPDATE participants SET email_status = @p0 WHERE id = @p1 AND event_id = @p2`,
+  await executeSql(
+    `UPDATE participants SET email_status = ? WHERE id = ? AND event_id = ?`,
     [status, participantId, eventId]
   );
   respondJson(res, 200, {
@@ -772,7 +814,7 @@ async function resendNotification(req, res) {
   if (!eventId) {
     return sendBadRequest(res, 'Identifiant évènement invalide');
   }
-  const event = getEventForOwner(eventId, req.user.userId);
+  const event = await getEventForOwner(eventId, req.user.userId);
   if (!event) {
     return sendNotFound(res, "Évènement introuvable");
   }
@@ -780,7 +822,7 @@ async function resendNotification(req, res) {
   if (!participantEmail) {
     return sendBadRequest(res, 'Adresse email du participant manquante');
   }
-  const participant = getParticipantForEventByEmail(eventId, participantEmail);
+  const participant = await getParticipantForEventByEmail(eventId, participantEmail);
   if (!participant) {
     return sendNotFound(res, 'Participant introuvable');
   }
@@ -790,8 +832,8 @@ async function resendNotification(req, res) {
       "Ce participant n'a pas encore reçu d'assignation de cadeau"
     );
   }
-  const recipientRows = querySql(
-    `SELECT id, name, email FROM participants WHERE id = @p0`,
+  const recipientRows = await querySql(
+    `SELECT id, name, email FROM participants WHERE id = ?`,
     [participant.assignedRecipientId]
   );
   if (recipientRows.length === 0) {
@@ -799,13 +841,13 @@ async function resendNotification(req, res) {
   }
   const recipient = recipientRows[0];
   const message = `Bonjour ${participant.name},\n\nVous offrirez un cadeau à ${recipient.name} (${recipient.email}).\nBonne préparation !`;
-  const now = new Date().toISOString();
+  const now = nowDateTime();
   try {
     await sendEmail(participant.email, EMAIL_SUBJECT, message);
-    executeSql(
+    await executeSql(
       `UPDATE participants
-       SET email_status = 'sent', email_error = NULL, email_sent_at = @p0
-       WHERE id = @p1 AND event_id = @p2`,
+       SET email_status = 'sent', email_error = NULL, email_sent_at = ?
+       WHERE id = ? AND event_id = ?`,
       [now, participant.id, eventId]
     );
     respondJson(res, 200, {
@@ -814,15 +856,15 @@ async function resendNotification(req, res) {
         status: 'sent',
         email: participant.email,
         name: participant.name,
-        sentAt: now,
+        sentAt: toIsoString(now),
       },
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    executeSql(
+    await executeSql(
       `UPDATE participants
-       SET email_status = 'failed', email_error = @p0, email_sent_at = @p1
-       WHERE id = @p2 AND event_id = @p3`,
+       SET email_status = 'failed', email_error = ?, email_sent_at = ?
+       WHERE id = ? AND event_id = ?`,
       [errorMessage, now, participant.id, eventId]
     );
     respondJson(res, 500, {
@@ -853,6 +895,16 @@ app.post('/api/events/:id/notifications/resend', authMiddleware, (req, res) =>
   resendNotification(req, res)
 );
 
-app.listen(PORT, () => {
-  console.log(`Secret Santa API disponible sur http://localhost:${PORT}`);
-});
+async function startServer() {
+  try {
+    await initializeDatabase();
+    app.listen(PORT, () => {
+      console.log(`Secret Santa API disponible sur http://localhost:${PORT}`);
+    });
+  } catch (error) {
+    console.error('[Startup] Database initialization failed:', error);
+    process.exit(1);
+  }
+}
+
+startServer();

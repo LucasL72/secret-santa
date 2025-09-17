@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "secret-santa",
   "main": "index.js",
-   "scripts": {
+  "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node index.js",
     "dev": "nodemon index.js"
@@ -13,5 +13,9 @@
     "url": "secret-santa"
   },
   "author": "LucasL72",
-  "license": "ISC"
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "mysql2": "^3.9.7"
+  }
 }
