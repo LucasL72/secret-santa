@@ -637,6 +637,169 @@ async function getEventStatus(req, res) {
   respondJson(res, 200, { event, participants });
 }
 
+function getEventForOwner(eventId, ownerId) {
+  if (!eventId) {
+    return null;
+  }
+  const events = querySql(
+    `SELECT id, owner_id as ownerId, name, description, event_date as eventDate,
+            draw_generated as drawGenerated, created_at as createdAt
+     FROM events WHERE id = @p0`,
+    [eventId]
+  );
+  if (events.length === 0) {
+    return null;
+  }
+  const event = events[0];
+  if (event.ownerId !== ownerId) {
+    return null;
+  }
+  return event;
+}
+
+function getParticipantForEventById(eventId, participantId) {
+  if (!participantId) {
+    return null;
+  }
+  const participants = querySql(
+    `SELECT id, name, email, email_status as emailStatus, email_error as emailError,
+            email_sent_at as emailSentAt, assigned_recipient_id as assignedRecipientId
+     FROM participants WHERE event_id = @p0 AND id = @p1`,
+    [eventId, participantId]
+  );
+  return participants[0] || null;
+}
+
+function getParticipantForEventByEmail(eventId, participantEmail) {
+  const email = sanitizeEmail(participantEmail);
+  if (!email) {
+    return null;
+  }
+  const participants = querySql(
+    `SELECT id, name, email, email_status as emailStatus, email_error as emailError,
+            email_sent_at as emailSentAt, assigned_recipient_id as assignedRecipientId
+     FROM participants WHERE event_id = @p0 AND email = @p1`,
+    [eventId, email]
+  );
+  return participants[0] || null;
+}
+
+async function listEventNotifications(req, res) {
+  const eventId = Number(req.params.id);
+  if (!eventId) {
+    return sendBadRequest(res, 'Identifiant évènement invalide');
+  }
+  const event = getEventForOwner(eventId, req.user.userId);
+  if (!event) {
+    return sendNotFound(res, "Évènement introuvable");
+  }
+  const notifications = querySql(
+    `SELECT id, name, email, email_status as emailStatus, email_error as emailError,
+            email_sent_at as emailSentAt, assigned_recipient_id as assignedRecipientId
+     FROM participants WHERE event_id = @p0
+     ORDER BY created_at ASC`,
+    [eventId]
+  );
+  respondJson(res, 200, { event: { id: event.id, name: event.name }, notifications });
+}
+
+async function acknowledgeNotification(req, res) {
+  const eventId = Number(req.params.id);
+  const participantId = Number(req.params.notificationId);
+  if (!eventId || !participantId) {
+    return sendBadRequest(res, 'Identifiants de notification invalides');
+  }
+  const event = getEventForOwner(eventId, req.user.userId);
+  if (!event) {
+    return sendNotFound(res, "Évènement introuvable");
+  }
+  const participant = getParticipantForEventById(eventId, participantId);
+  if (!participant) {
+    return sendNotFound(res, 'Notification introuvable');
+  }
+  const status = String(req.body.status || '').trim();
+  if (!status) {
+    return sendBadRequest(res, 'Statut de notification manquant');
+  }
+  executeSql(
+    `UPDATE participants SET email_status = @p0 WHERE id = @p1 AND event_id = @p2`,
+    [status, participantId, eventId]
+  );
+  respondJson(res, 200, {
+    notification: {
+      id: participantId,
+      status,
+      email: participant.email,
+      name: participant.name,
+    },
+  });
+}
+
+async function resendNotification(req, res) {
+  const eventId = Number(req.params.id);
+  if (!eventId) {
+    return sendBadRequest(res, 'Identifiant évènement invalide');
+  }
+  const event = getEventForOwner(eventId, req.user.userId);
+  if (!event) {
+    return sendNotFound(res, "Évènement introuvable");
+  }
+  const participantEmail = sanitizeEmail(req.body.participantEmail);
+  if (!participantEmail) {
+    return sendBadRequest(res, 'Adresse email du participant manquante');
+  }
+  const participant = getParticipantForEventByEmail(eventId, participantEmail);
+  if (!participant) {
+    return sendNotFound(res, 'Participant introuvable');
+  }
+  if (!participant.assignedRecipientId) {
+    return sendBadRequest(
+      res,
+      "Ce participant n'a pas encore reçu d'assignation de cadeau"
+    );
+  }
+  const recipientRows = querySql(
+    `SELECT id, name, email FROM participants WHERE id = @p0`,
+    [participant.assignedRecipientId]
+  );
+  if (recipientRows.length === 0) {
+    return sendNotFound(res, 'Assignation de cadeau introuvable');
+  }
+  const recipient = recipientRows[0];
+  const message = `Bonjour ${participant.name},\n\nVous offrirez un cadeau à ${recipient.name} (${recipient.email}).\nBonne préparation !`;
+  const now = new Date().toISOString();
+  try {
+    await sendEmail(participant.email, EMAIL_SUBJECT, message);
+    executeSql(
+      `UPDATE participants
+       SET email_status = 'sent', email_error = NULL, email_sent_at = @p0
+       WHERE id = @p1 AND event_id = @p2`,
+      [now, participant.id, eventId]
+    );
+    respondJson(res, 200, {
+      notification: {
+        id: participant.id,
+        status: 'sent',
+        email: participant.email,
+        name: participant.name,
+        sentAt: now,
+      },
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    executeSql(
+      `UPDATE participants
+       SET email_status = 'failed', email_error = @p0, email_sent_at = @p1
+       WHERE id = @p2 AND event_id = @p3`,
+      [errorMessage, now, participant.id, eventId]
+    );
+    respondJson(res, 500, {
+      error: "L'envoi du message a échoué",
+      details: errorMessage,
+    });
+  }
+}
+
 // ---- Application bootstrap ----------------------------------------------
 const app = createApp();
 app.use(jsonBodyParser);
@@ -646,6 +809,17 @@ app.post('/api/auth/login', (req, res) => loginUser(req, res));
 app.post('/api/events', authMiddleware, (req, res) => createEvent(req, res));
 app.post('/api/events/:id/draw', authMiddleware, (req, res) => triggerDraw(req, res));
 app.get('/api/events/:id/status', authMiddleware, (req, res) => getEventStatus(req, res));
+app.get('/api/events/:id/notifications', authMiddleware, (req, res) =>
+  listEventNotifications(req, res)
+);
+app.patch(
+  '/api/events/:id/notifications/:notificationId',
+  authMiddleware,
+  (req, res) => acknowledgeNotification(req, res)
+);
+app.post('/api/events/:id/notifications/resend', authMiddleware, (req, res) =>
+  resendNotification(req, res)
+);
 
 app.listen(PORT, () => {
   console.log(`Secret Santa API disponible sur http://localhost:${PORT}`);

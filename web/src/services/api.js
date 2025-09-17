@@ -1,4 +1,4 @@
-const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:4000/api';
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:3000/api';
 
 async function request(path, options = {}) {
   const url = `${API_BASE_URL}${path}`;
@@ -31,14 +31,14 @@ async function request(path, options = {}) {
 }
 
 export async function registerCreator({ fullName, email, password }) {
-  return request('/creators/register', {
+  return request('/auth/register', {
     method: 'POST',
     body: { fullName, email, password },
   });
 }
 
 export async function loginCreator({ email, password }) {
-  return request('/creators/login', {
+  return request('/auth/login', {
     method: 'POST',
     body: { email, password },
   });
