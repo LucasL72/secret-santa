@@ -64,19 +64,17 @@ function Auth({ onSuccess, onCancel = () => {} }) {
         password: form.password,
       };
 
-      if (mode === 'register') {
-        const response = await registerCreator({
-          ...payload,
-          fullName: form.fullName.trim(),
-        });
-        if (onSuccess) {
-          onSuccess(response);
-        }
-      } else {
-        const response = await loginCreator(payload);
-        if (onSuccess) {
-          onSuccess(response);
-        }
+      const response =
+        mode === 'register'
+          ? await registerCreator({
+              ...payload,
+              fullName: form.fullName.trim(),
+            })
+          : await loginCreator(payload);
+
+      if (onSuccess) {
+        const { token, user } = response || {};
+        onSuccess(token, user);
       }
     } catch (error) {
       setServerError(
