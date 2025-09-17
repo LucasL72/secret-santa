@@ -51,9 +51,11 @@ function EventDetailsStep({ initialValues, onSubmit, onCancel = () => {} }) {
   };
 
   return (
-    <form className="EventDetailsStep" onSubmit={handleSubmit} noValidate>
-      <div className="field">
-        <label htmlFor="title">Nom de l’évènement</label>
+    <form className="d-flex flex-column gap-3" onSubmit={handleSubmit} noValidate>
+      <div>
+        <label className="form-label" htmlFor="title">
+          Nom de l’évènement
+        </label>
         <input
           id="title"
           name="title"
@@ -61,37 +63,48 @@ function EventDetailsStep({ initialValues, onSubmit, onCancel = () => {} }) {
           value={values.title}
           onChange={handleChange}
           placeholder="Secret Santa de la famille Dupont"
+          className="form-control"
         />
-        {errors.title && <span className="error">{errors.title}</span>}
+        {errors.title && <div className="form-error">{errors.title}</div>}
       </div>
-      <div className="field">
-        <label htmlFor="deadline">Date limite d’envoi</label>
-        <input
-          id="deadline"
-          name="deadline"
-          type="date"
-          value={values.deadline}
-          onChange={handleChange}
-          required
-        />
-        {errors.deadline && <span className="error">{errors.deadline}</span>}
+      <div className="row g-4">
+        <div className="col-md-6">
+          <label className="form-label" htmlFor="deadline">
+            Date limite d’envoi
+          </label>
+          <input
+            id="deadline"
+            name="deadline"
+            type="date"
+            value={values.deadline}
+            onChange={handleChange}
+            required
+            className="form-control"
+          />
+          {errors.deadline && <div className="form-error">{errors.deadline}</div>}
+        </div>
+        <div className="col-md-6">
+          <label className="form-label" htmlFor="budget">
+            Budget maximum (en €)
+          </label>
+          <input
+            id="budget"
+            name="budget"
+            type="number"
+            min="1"
+            step="1"
+            value={values.budget}
+            onChange={handleChange}
+            required
+            className="form-control"
+          />
+          {errors.budget && <div className="form-error">{errors.budget}</div>}
+        </div>
       </div>
-      <div className="field">
-        <label htmlFor="budget">Budget maximum (en €)</label>
-        <input
-          id="budget"
-          name="budget"
-          type="number"
-          min="1"
-          step="1"
-          value={values.budget}
-          onChange={handleChange}
-          required
-        />
-        {errors.budget && <span className="error">{errors.budget}</span>}
-      </div>
-      <div className="field">
-        <label htmlFor="location">Lieu de l’échange</label>
+      <div>
+        <label className="form-label" htmlFor="location">
+          Lieu de l’échange
+        </label>
         <input
           id="location"
           name="location"
@@ -99,14 +112,15 @@ function EventDetailsStep({ initialValues, onSubmit, onCancel = () => {} }) {
           value={values.location}
           onChange={handleChange}
           placeholder="Chez Mamie, 24 décembre"
+          className="form-control"
         />
-        {errors.location && <span className="error">{errors.location}</span>}
+        {errors.location && <div className="form-error">{errors.location}</div>}
       </div>
       <div className="form-actions">
-        <button type="button" onClick={onCancel}>
+        <button type="button" onClick={onCancel} className="btn btn-link">
           Annuler
         </button>
-        <button type="submit" className="primary">
+        <button type="submit" className="btn btn-primary">
           Continuer
         </button>
       </div>

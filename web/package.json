@@ -6,10 +6,14 @@
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.8.0",
     "@testing-library/react": "^16.3.0",
+    "@fontsource/hackney": "file:packages/@fontsource/hackney",
+    "@fontsource/handsome": "file:packages/@fontsource/handsome",
     "@testing-library/user-event": "^13.5.0",
+    "bootstrap": "file:packages/bootstrap",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "react-scripts": "5.0.1",
+    "sass": "file:packages/sass",
     "web-vitals": "^2.1.4"
   },
   "scripts": {

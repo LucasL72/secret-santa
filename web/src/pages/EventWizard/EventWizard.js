@@ -101,27 +101,31 @@ function EventWizard({ creator, onCancel = () => {}, onComplete }) {
   }
 
   return (
-    <section className="EventWizard">
-      <header>
-        <h1>Assistant de création d’évènement</h1>
-        <p>
-          Configurez votre Secret Santa étape par étape. Les informations
-          saisies sont sauvegardées à chaque progression.
-        </p>
-      </header>
-      <ol className="EventWizard-steps">
-        {steps.map((step, index) => (
-          <li
-            key={step.id}
-            aria-current={index === currentStep ? 'step' : undefined}
-            className={index === currentStep ? 'active' : ''}
-          >
-            <span>{index + 1}</span>
-            {step.label}
-          </li>
-        ))}
-      </ol>
-      <div className="EventWizard-content">{stepContent}</div>
+    <section className="event-wizard py-5">
+      <div className="container">
+        <header className="mb-4 text-center">
+          <h1 className="fs-3 mb-2">Assistant de création d’évènement</h1>
+          <p className="text-muted mb-0">
+            Configurez votre Secret Santa étape par étape. Les informations sont
+            sauvegardées à chaque progression.
+          </p>
+        </header>
+        <ol className="wizard-steps mb-4" role="list">
+          {steps.map((step, index) => (
+            <li
+              key={step.id}
+              aria-current={index === currentStep ? 'step' : undefined}
+              className={index === currentStep ? 'active' : ''}
+            >
+              <span className="step-index">{index + 1}</span>
+              <span className="step-label">{step.label}</span>
+            </li>
+          ))}
+        </ol>
+        <div className="card shadow-lg">
+          <div className="card-body">{stepContent}</div>
+        </div>
+      </div>
     </section>
   );
 }

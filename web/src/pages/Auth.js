@@ -94,88 +94,129 @@ function Auth({ onSuccess, onCancel = () => {} }) {
   };
 
   return (
-    <section className="Auth">
-      <header>
-        <h1>{mode === 'login' ? 'Connexion' : 'Inscription'}</h1>
-        <p>
-          {mode === 'login'
-            ? 'Connectez-vous pour configurer votre échange de cadeaux.'
-            : 'Créez votre compte de créateur pour lancer un nouvel évènement.'}
-        </p>
-      </header>
-      <form onSubmit={handleSubmit} noValidate>
-        {mode === 'register' && (
-          <div className="field">
-            <label htmlFor="fullName">Nom complet</label>
-            <input
-              id="fullName"
-              name="fullName"
-              type="text"
-              value={form.fullName}
-              onChange={handleChange}
-              autoComplete="name"
-            />
-            {errors.fullName && <span className="error">{errors.fullName}</span>}
+    <section className="auth-view py-5">
+      <div className="container">
+        <div className="row justify-content-center">
+          <div className="col-lg-6 col-md-8">
+            <div className="card shadow-lg">
+              <div className="card-body">
+                <header className="mb-4 text-center">
+                  <h1 className="fs-3 mb-2">
+                    {mode === 'login' ? 'Connexion' : 'Inscription'} festive
+                  </h1>
+                  <p className="text-muted mb-0">
+                    {mode === 'login'
+                      ? 'Connectez-vous pour configurer votre échange de cadeaux.'
+                      : 'Créez votre compte de créateur pour lancer un nouvel évènement.'}
+                  </p>
+                </header>
+                <form onSubmit={handleSubmit} noValidate className="d-flex flex-column gap-3">
+                  {mode === 'register' && (
+                    <div>
+                      <label className="form-label" htmlFor="fullName">
+                        Nom complet
+                      </label>
+                      <input
+                        id="fullName"
+                        name="fullName"
+                        type="text"
+                        value={form.fullName}
+                        onChange={handleChange}
+                        autoComplete="name"
+                        className="form-control"
+                      />
+                      {errors.fullName && <div className="form-error">{errors.fullName}</div>}
+                    </div>
+                  )}
+                  <div>
+                    <label className="form-label" htmlFor="email">
+                      Adresse e-mail
+                    </label>
+                    <input
+                      id="email"
+                      name="email"
+                      type="email"
+                      value={form.email}
+                      onChange={handleChange}
+                      autoComplete="email"
+                      required
+                      className="form-control"
+                    />
+                    {errors.email && <div className="form-error">{errors.email}</div>}
+                  </div>
+                  <div>
+                    <label className="form-label" htmlFor="password">
+                      Mot de passe
+                    </label>
+                    <input
+                      id="password"
+                      name="password"
+                      type="password"
+                      value={form.password}
+                      onChange={handleChange}
+                      autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                      required
+                      className="form-control"
+                    />
+                    <div className="form-text">
+                      Minimum 8 caractères avec une touche de magie.
+                    </div>
+                    {errors.password && <div className="form-error">{errors.password}</div>}
+                  </div>
+                  {mode === 'register' && (
+                    <div>
+                      <label className="form-label" htmlFor="confirmPassword">
+                        Confirmation du mot de passe
+                      </label>
+                      <input
+                        id="confirmPassword"
+                        name="confirmPassword"
+                        type="password"
+                        value={form.confirmPassword}
+                        onChange={handleChange}
+                        autoComplete="new-password"
+                        required
+                        className="form-control"
+                      />
+                      {errors.confirmPassword && (
+                        <div className="form-error">{errors.confirmPassword}</div>
+                      )}
+                    </div>
+                  )}
+                  {serverError && (
+                    <div className="alert" role="alert">
+                      {serverError}
+                    </div>
+                  )}
+                  <div className="form-actions">
+                    <button type="submit" disabled={loading} className="btn btn-primary w-100">
+                      {loading ? 'Patientez…' : mode === 'login' ? 'Se connecter' : "S'inscrire"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={switchMode}
+                      disabled={loading}
+                      className="btn btn-ghost w-100"
+                    >
+                      {mode === 'login'
+                        ? "Pas encore de compte ? Inscrivez-vous"
+                        : 'Déjà inscrit ? Connectez-vous'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onCancel}
+                      disabled={loading}
+                      className="btn btn-link w-100"
+                    >
+                      Annuler
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
           </div>
-        )}
-        <div className="field">
-          <label htmlFor="email">Adresse e-mail</label>
-          <input
-            id="email"
-            name="email"
-            type="email"
-            value={form.email}
-            onChange={handleChange}
-            autoComplete="email"
-            required
-          />
-          {errors.email && <span className="error">{errors.email}</span>}
         </div>
-        <div className="field">
-          <label htmlFor="password">Mot de passe</label>
-          <input
-            id="password"
-            name="password"
-            type="password"
-            value={form.password}
-            onChange={handleChange}
-            autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-            required
-          />
-          {errors.password && <span className="error">{errors.password}</span>}
-        </div>
-        {mode === 'register' && (
-          <div className="field">
-            <label htmlFor="confirmPassword">Confirmation du mot de passe</label>
-            <input
-              id="confirmPassword"
-              name="confirmPassword"
-              type="password"
-              value={form.confirmPassword}
-              onChange={handleChange}
-              autoComplete="new-password"
-              required
-            />
-            {errors.confirmPassword && (
-              <span className="error">{errors.confirmPassword}</span>
-            )}
-          </div>
-        )}
-        {serverError && <div className="error" role="alert">{serverError}</div>}
-        <div className="Auth-actions">
-          <button type="submit" disabled={loading} className="primary">
-            {loading ? 'Patientez…' : mode === 'login' ? 'Se connecter' : "S'inscrire"}
-          </button>
-          <button type="button" onClick={switchMode} disabled={loading}>
-            {mode === 'login'
-              ? "Pas encore de compte ? Inscrivez-vous"
-              : 'Déjà inscrit ? Connectez-vous'}
-          </button>
-          <button type="button" onClick={onCancel} disabled={loading}>
-            Annuler
-          </button>
-        </div>
-      </form>
+      </div>
     </section>
   );
 }

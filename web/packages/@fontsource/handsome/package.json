@@ -1,0 +1,9 @@
+{
+  "name": "@fontsource/handsome",
+  "version": "5.1.0",
+  "description": "Handsome script font loader for Secret Santa",
+  "style": "index.css",
+  "main": "index.js",
+  "license": "OFL-1.1",
+  "author": "Secret Santa Team"
+}

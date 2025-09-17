@@ -1,0 +1,8 @@
+{
+  "name": "sass",
+  "version": "1.79.4-custom",
+  "description": "Lightweight stub for SCSS passthrough compilation in offline mode",
+  "main": "index.js",
+  "license": "MIT",
+  "author": "Secret Santa Team"
+}
