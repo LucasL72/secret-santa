@@ -1,0 +1,6 @@
+/* Handsome festive script */
+@import url('https://fonts.cdnfonts.com/css/handsome');
+
+:root {
+  --font-handsome: 'Handsome', 'Brush Script MT', cursive;
+}

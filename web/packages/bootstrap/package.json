@@ -1,0 +1,10 @@
+{
+  "name": "bootstrap",
+  "version": "5.3.3-custom",
+  "description": "Custom Bootstrap-inspired toolkit for Secret Santa",
+  "main": "dist/js/bootstrap.bundle.min.js",
+  "style": "dist/css/bootstrap.min.css",
+  "keywords": ["bootstrap", "secret-santa", "theme"],
+  "author": "Secret Santa Team",
+  "license": "MIT"
+}

@@ -75,11 +75,16 @@ function ParticipantsStep({
   };
 
   return (
-    <div className="ParticipantsStep">
-      <p>Ajoutez chaque membre de la famille pour lui attribuer un destinataire.</p>
-      <form className="ParticipantsStep-form" onSubmit={handleAddParticipant}>
-        <div className="field">
-          <label htmlFor="participant-name">Nom</label>
+    <div className="participants-step d-flex flex-column gap-4">
+      <p className="text-muted">
+        Ajoutez chaque membre de la famille pour lui attribuer un destinataire
+        magique.
+      </p>
+      <form className="row g-3 align-items-end" onSubmit={handleAddParticipant}>
+        <div className="col-md-4">
+          <label className="form-label" htmlFor="participant-name">
+            Nom
+          </label>
           <input
             id="participant-name"
             name="name"
@@ -87,11 +92,14 @@ function ParticipantsStep({
             value={candidate.name}
             onChange={handleCandidateChange}
             placeholder="Ex. Alice"
+            className="form-control"
           />
-          {fieldErrors.name && <span className="error">{fieldErrors.name}</span>}
+          {fieldErrors.name && <div className="form-error">{fieldErrors.name}</div>}
         </div>
-        <div className="field">
-          <label htmlFor="participant-email">Adresse e-mail</label>
+        <div className="col-md-5">
+          <label className="form-label" htmlFor="participant-email">
+            Adresse e-mail
+          </label>
           <input
             id="participant-email"
             name="email"
@@ -99,25 +107,29 @@ function ParticipantsStep({
             value={candidate.email}
             onChange={handleCandidateChange}
             placeholder="alice@example.com"
+            className="form-control"
           />
-          {fieldErrors.email && <span className="error">{fieldErrors.email}</span>}
+          {fieldErrors.email && <div className="form-error">{fieldErrors.email}</div>}
         </div>
-        <button type="submit" className="secondary">
-          Ajouter
-        </button>
+        <div className="col-md-3">
+          <button type="submit" className="btn btn-primary w-100">
+            Ajouter
+          </button>
+        </div>
       </form>
       <div className="ParticipantsStep-list" role="group" aria-label="Participants">
         {sortedParticipants.length === 0 ? (
-          <p>Vous n’avez pas encore ajouté de participant.</p>
+          <p className="text-muted">Vous n’avez pas encore ajouté de participant.</p>
         ) : (
-          <ul>
+          <ul className="list-group">
             {sortedParticipants.map((participant) => (
-              <li key={participant.email}>
+              <li className="list-group-item" key={participant.email}>
                 <span>
                   {participant.name} — {participant.email}
                 </span>
                 <button
                   type="button"
+                  className="btn btn-link"
                   onClick={() => handleRemoveParticipant(participant.email)}
                 >
                   Retirer
@@ -127,15 +139,19 @@ function ParticipantsStep({
           </ul>
         )}
       </div>
-      {globalError && <div className="error" role="alert">{globalError}</div>}
+      {globalError && (
+        <div className="alert" role="alert">
+          {globalError}
+        </div>
+      )}
       <div className="form-actions">
-        <button type="button" onClick={onBack}>
+        <button type="button" onClick={onBack} className="btn btn-link">
           Retour
         </button>
-        <button type="button" onClick={handleNext} className="primary">
+        <button type="button" onClick={handleNext} className="btn btn-primary">
           Continuer
         </button>
-        <button type="button" onClick={onCancel}>
+        <button type="button" onClick={onCancel} className="btn btn-ghost">
           Annuler
         </button>
       </div>

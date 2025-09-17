@@ -7,13 +7,15 @@ function ConfirmationStep({
   error,
 }) {
   return (
-    <div className="ConfirmationStep">
-      <h2>Vérifiez les informations</h2>
-      <p>
-        Assurez-vous que tout est correct avant d’envoyer les invitations aux
-        participants. Vous pourrez ensuite suivre l’état des notifications.
-      </p>
-      <dl className="summary">
+    <div className="confirmation-step d-flex flex-column gap-4">
+      <header>
+        <h2 className="fs-3 mb-2">Vérifiez les informations</h2>
+        <p className="text-muted mb-0">
+          Assurez-vous que tout est correct avant d’envoyer les invitations aux
+          participants. Vous pourrez ensuite suivre l’état des notifications.
+        </p>
+      </header>
+      <dl className="table-summary">
         <div>
           <dt>Titre</dt>
           <dd>{details.title}</dd>
@@ -32,25 +34,30 @@ function ConfirmationStep({
         </div>
       </dl>
       <section>
-        <h3>Participants ({participants.length})</h3>
-        <ul>
+        <h3 className="fs-5 mb-3">Participants ({participants.length})</h3>
+        <ul className="list-group">
           {participants.map((participant) => (
-            <li key={participant.email}>
+            <li className="list-group-item" key={participant.email}>
               {participant.name} — {participant.email}
             </li>
           ))}
         </ul>
       </section>
       {error && (
-        <div className="error" role="alert">
+        <div className="alert" role="alert">
           {error}
         </div>
       )}
       <div className="form-actions">
-        <button type="button" onClick={onBack} disabled={loading}>
+        <button type="button" onClick={onBack} disabled={loading} className="btn btn-link">
           Retour
         </button>
-        <button type="button" onClick={onConfirm} className="primary" disabled={loading}>
+        <button
+          type="button"
+          onClick={onConfirm}
+          className="btn btn-primary"
+          disabled={loading}
+        >
           {loading ? 'Création en cours…' : 'Confirmer et envoyer les invitations'}
         </button>
       </div>

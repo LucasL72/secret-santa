@@ -1,0 +1,6 @@
+/* Hackney decorative title font */
+@import url('https://fonts.cdnfonts.com/css/hackney');
+
+:root {
+  --font-hackney: 'Hackney', 'Segoe UI', system-ui;
+}

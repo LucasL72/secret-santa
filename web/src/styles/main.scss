@@ -1,0 +1,127 @@
+@import 'bootstrap/dist/css/bootstrap.min.css';
+
+.holiday-script {
+  font-family: var(--bs-font-heading);
+  display: inline-block;
+  background: linear-gradient(120deg, var(--bs-secondary), var(--bs-primary));
+  -webkit-background-clip: text;
+  color: transparent;
+  padding-inline: 0.35rem;
+}
+
+.app-shell {
+  position: relative;
+}
+
+.app-header .brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-family: var(--bs-font-heading);
+}
+
+.theme-toggle {
+  white-space: nowrap;
+}
+
+.app-footer {
+  margin-top: auto;
+}
+
+.home-view .holiday-illustration {
+  min-height: 280px;
+}
+
+.home-view .holiday-illustration h2 {
+  font-family: var(--bs-font-heading);
+}
+
+.home-view .holiday-illustration p {
+  color: var(--bs-primary-contrast);
+}
+
+.home-view .card {
+  height: 100%;
+}
+
+.event-wizard .wizard-steps {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 1rem;
+  padding: 0;
+  list-style: none;
+}
+
+.event-wizard .wizard-steps li {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-radius: 999px;
+  border: 1px solid var(--bs-card-border);
+  background: rgba(255, 255, 255, 0.55);
+  color: var(--bs-muted-color);
+  transition: transform var(--bs-transition), box-shadow var(--bs-transition);
+}
+
+[data-theme='dark'] .event-wizard .wizard-steps li,
+@media (prefers-color-scheme: dark) {
+  .event-wizard .wizard-steps li {
+    background: rgba(24, 21, 28, 0.65);
+  }
+}
+
+.event-wizard .wizard-steps li.active {
+  border-color: var(--bs-secondary);
+  color: var(--bs-body-color);
+  box-shadow: 0 12px 32px -20px var(--bs-secondary);
+}
+
+.event-wizard .wizard-steps .step-index {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--bs-secondary);
+  color: var(--bs-primary-contrast);
+  font-weight: 700;
+}
+
+.event-wizard .wizard-steps .step-label {
+  font-weight: 600;
+}
+
+.participants-step .list-group {
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.confirmation-step .list-group {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.theme-toggle span:first-child {
+  font-size: 1.25rem;
+}
+
+.d-none {
+  display: none !important;
+}
+
+@media (min-width: 768px) {
+  .d-md-inline {
+    display: inline !important;
+  }
+}
+
+.flex-grow-1 {
+  flex-grow: 1 !important;
+}
+
+.h-100 {
+  height: 100% !important;
+}
