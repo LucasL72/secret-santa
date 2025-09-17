@@ -653,27 +653,6 @@ ol {
   right: -20px;
 }
 
-.holiday-illustration .snow {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background-image: radial-gradient(rgba(255, 255, 255, 0.85) 1px, transparent 0),
-    radial-gradient(rgba(255, 255, 255, 0.6) 2px, transparent 0),
-    radial-gradient(rgba(255, 255, 255, 0.4) 1px, transparent 0);
-  background-size: 80px 80px, 110px 110px, 140px 140px;
-  animation: snowFall 18s linear infinite;
-  opacity: 0.6;
-}
-
-@keyframes snowFall {
-  0% {
-    background-position: 0 0, 0 0, 0 0;
-  }
-  100% {
-    background-position: 0 200px, 50px 220px, -40px 240px;
-  }
-}
-
 .app-shell {
   background: var(--bs-body-bg);
   color: var(--bs-body-color);

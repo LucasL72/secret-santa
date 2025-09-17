@@ -1,5 +1,37 @@
 @import 'bootstrap/dist/css/bootstrap.min.css';
 
+.holiday-illustration {
+  position: relative;
+}
+
+.holiday-illustration .snow {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.85) 1px, transparent 0),
+    radial-gradient(rgba(255, 255, 255, 0.6) 2px, transparent 0),
+    radial-gradient(rgba(255, 255, 255, 0.4) 1px, transparent 0);
+  background-size: 80px 80px, 110px 110px, 140px 140px;
+  opacity: 0.6;
+  display: none;
+  animation: none;
+}
+
+@keyframes snowFall {
+  0% {
+    background-position: 0 0, 0 0, 0 0;
+  }
+
+  100% {
+    background-position: 0 200px, 50px 220px, -40px 240px;
+  }
+}
+
+[data-theme='dark'] .holiday-illustration .snow {
+  display: block;
+  animation: snowFall 18s linear infinite;
+}
+
 .holiday-script {
   font-family: var(--bs-font-heading);
   display: inline-block;
