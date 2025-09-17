@@ -2,8 +2,16 @@ import { useEffect, useMemo, useState } from 'react';
 import Home from './pages/Home';
 import Auth from './pages/Auth';
 import EventWizard from './pages/EventWizard/EventWizard';
+import { AUTH_TOKEN_STORAGE_KEY, setAuthToken as setApiAuthToken } from './services/api';
 
 const THEME_STORAGE_KEY = 'ssfl-theme-preference';
+
+const getInitialAuthToken = () => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  return localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+};
 
 const getInitialThemePreference = () => {
   if (typeof window === 'undefined') {
@@ -28,6 +36,7 @@ function App() {
   const [eventSummary, setEventSummary] = useState(null);
   const [themePreference, setThemePreference] = useState(getInitialThemePreference);
   const [systemPrefersDark, setSystemPrefersDark] = useState(getSystemPrefersDark);
+  const [authToken, setAuthToken] = useState(getInitialAuthToken);
 
   const navigation = useMemo(
     () => ({
@@ -42,8 +51,9 @@ function App() {
     []
   );
 
-  const handleAuthSuccess = (account) => {
-    setCreator(account);
+  const handleAuthSuccess = (token, account) => {
+    setAuthToken(token || null);
+    setCreator(account || null);
     navigation.goWizard();
   };
 
@@ -53,8 +63,10 @@ function App() {
   };
 
   const handleSignOut = () => {
+    setApiAuthToken(null);
     setCreator(null);
     setEventSummary(null);
+    setAuthToken(null);
     navigation.goHome();
   };
 
@@ -93,6 +105,18 @@ function App() {
       document.documentElement.setAttribute('data-theme', resolvedTheme);
     }
   }, [resolvedTheme]);
+
+  useEffect(() => {
+    setApiAuthToken(authToken);
+    if (typeof window === 'undefined') {
+      return;
+    }
+    if (authToken) {
+      localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, authToken);
+    } else {
+      localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+    }
+  }, [authToken]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -139,6 +163,7 @@ function App() {
       content = (
         <EventWizard
           creator={creator}
+          authToken={authToken}
           onCancel={navigation.goHome}
           onComplete={handleEventComplete}
         />

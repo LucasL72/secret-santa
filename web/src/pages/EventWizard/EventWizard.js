@@ -11,7 +11,7 @@ const initialDetails = {
   location: '',
 };
 
-function EventWizard({ creator, onCancel = () => {}, onComplete }) {
+function EventWizard({ creator, authToken, onCancel = () => {}, onComplete }) {
   const steps = useMemo(
     () => [
       { id: 'details', label: 'Paramètres' },
@@ -56,7 +56,7 @@ function EventWizard({ creator, onCancel = () => {}, onComplete }) {
         creatorId: creator?.id || null,
         creatorEmail: creator?.email || null,
       };
-      const response = await createEvent(requestPayload);
+      const response = await createEvent(requestPayload, authToken);
       const eventData = response?.event || {};
       const summaryParticipants = Array.isArray(eventData.participants)
         ? eventData.participants
