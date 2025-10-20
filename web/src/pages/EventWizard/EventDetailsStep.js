@@ -1,8 +1,17 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
-function EventDetailsStep({ initialValues, onSubmit, onCancel = () => {} }) {
+function EventDetailsStep({
+  initialValues,
+  onSubmit,
+  onCancel = () => {},
+  externalErrors = {},
+}) {
   const [values, setValues] = useState(initialValues);
   const [errors, setErrors] = useState({});
+
+  useEffect(() => {
+    setErrors(externalErrors || {});
+  }, [externalErrors]);
 
   const validate = () => {
     const nextErrors = {};
@@ -41,6 +50,14 @@ function EventDetailsStep({ initialValues, onSubmit, onCancel = () => {} }) {
   const handleChange = (event) => {
     const { name, value } = event.target;
     setValues((prev) => ({ ...prev, [name]: value }));
+    setErrors((prev) => {
+      if (!prev[name]) {
+        return prev;
+      }
+      const nextErrors = { ...prev };
+      delete nextErrors[name];
+      return nextErrors;
+    });
   };
 
   const handleSubmit = (event) => {
@@ -63,7 +80,7 @@ function EventDetailsStep({ initialValues, onSubmit, onCancel = () => {} }) {
           value={values.title}
           onChange={handleChange}
           placeholder="Secret Santa de la famille Dupont"
-          className="form-control"
+          className={`form-control${errors.title ? ' is-invalid' : ''}`}
         />
         {errors.title && <div className="form-error">{errors.title}</div>}
       </div>
@@ -79,7 +96,7 @@ function EventDetailsStep({ initialValues, onSubmit, onCancel = () => {} }) {
             value={values.deadline}
             onChange={handleChange}
             required
-            className="form-control"
+            className={`form-control${errors.deadline ? ' is-invalid' : ''}`}
           />
           {errors.deadline && <div className="form-error">{errors.deadline}</div>}
         </div>
@@ -96,7 +113,7 @@ function EventDetailsStep({ initialValues, onSubmit, onCancel = () => {} }) {
             value={values.budget}
             onChange={handleChange}
             required
-            className="form-control"
+            className={`form-control${errors.budget ? ' is-invalid' : ''}`}
           />
           {errors.budget && <div className="form-error">{errors.budget}</div>}
         </div>
@@ -112,7 +129,7 @@ function EventDetailsStep({ initialValues, onSubmit, onCancel = () => {} }) {
           value={values.location}
           onChange={handleChange}
           placeholder="Chez Mamie, 24 décembre"
-          className="form-control"
+          className={`form-control${errors.location ? ' is-invalid' : ''}`}
         />
         {errors.location && <div className="form-error">{errors.location}</div>}
       </div>
