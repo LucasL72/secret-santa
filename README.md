@@ -5,7 +5,7 @@ Family Link Secret Santa est une application complète permettant d'organiser un
 
 ## Prérequis
 - **Node.js 18 ou supérieur** et **npm** pour exécuter les scripts du frontend et du backend.
-- **SQLite 3** installé sur la machine (l'API s'appuie sur l'exécutable `sqlite3`).
+- **Serveur MySQL 8** (ou compatible) avec l'utilitaire en ligne de commande `mysql` disponible.
 - Facultatif : **nodemon** (`npm install -g nodemon`) si vous souhaitez recharger automatiquement l'API en développement.
 
 ## Installation
@@ -58,7 +58,7 @@ Family Link Secret Santa est une application complète permettant d'organiser un
 
 ## Description fonctionnelle
 - **Créateur d'évènement** : un utilisateur peut s'inscrire ou se connecter pour créer un Secret Santa, définir les détails (titre, date, budget, lieu) et conserver un tableau récapitulatif.
-- **Gestion des participants** : l'interface wizard permet d'ajouter plusieurs participants (nom + email), de visualiser la liste et de confirmer avant validation. Les données sont persistées en base SQLite.
+- **Gestion des participants** : l'interface wizard permet d'ajouter plusieurs participants (nom + email), de visualiser la liste et de confirmer avant validation. Les données sont persistées en base MySQL.
 - **Tirage et notifications e-mail** : côté backend, un tirage aléatoire associe chaque participant à un destinataire unique. L'envoi d'e-mails est simulé par des logs structurés dans la console (les points d'extension permettent d'intégrer un service SMTP réel).
 - **Mode sombre** : le frontend propose un commutateur clair/sombre. La préférence est mémorisée dans `localStorage` tout en respectant les préférences système.
 
@@ -69,11 +69,33 @@ Family Link Secret Santa est une application complète permettant d'organiser un
 | `JWT_SECRET` | Backend | `development-secret` | Secret utilisé pour signer les tokens JWT des créateurs. |
 | `MAIL_SENDER` | Backend | `secret-santa@example.com` | Adresse d'expéditeur affichée dans les e-mails simulés. |
 | `MAIL_SUBJECT` | Backend | `Votre tirage Secret Santa` | Sujet des notifications envoyées aux participants. |
+| `MYSQL_HOST` | Backend | `localhost` | Hôte du serveur MySQL. |
+| `MYSQL_PORT` | Backend | `3306` | Port TCP du serveur MySQL. |
+| `MYSQL_DATABASE` | Backend | `secret_santa` | Nom de la base de données utilisée par l'API. |
+| `MYSQL_USER` | Backend | `root` | Utilisateur MySQL utilisé pour se connecter au serveur. |
+| `MYSQL_PASSWORD` | Backend | *(vide)* | Mot de passe MySQL associé à `MYSQL_USER`. |
+| `MYSQL_CONNECTION_LIMIT` | Backend | `10` | Taille maximale du pool de connexions MySQL. |
 | `REACT_APP_API_BASE_URL` | Frontend | `http://localhost:3000/api` | URL de base des appels REST. Ajustez-la si l'API tourne sur un autre hôte/port (par exemple `http://localhost:4000/api` si l'API écoute sur 4000). |
+
+## Migration MySQL
+L'API crée automatiquement les tables si la base est accessible. Vous devez cependant préparer le schéma et un utilisateur avec les droits nécessaires :
+
+1. Connectez-vous au serveur MySQL en tant qu'administrateur puis créez la base et l'utilisateur dédié :
+   ```bash
+   mysql -u root -p <<'SQL'
+   CREATE DATABASE IF NOT EXISTS secret_santa CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+   CREATE USER IF NOT EXISTS 'secret_santa'@'%' IDENTIFIED BY 'motdepasse-robuste';
+   GRANT ALL PRIVILEGES ON secret_santa.* TO 'secret_santa'@'%';
+   FLUSH PRIVILEGES;
+   SQL
+   ```
+   Adaptez le nom de la base, l'utilisateur, l'hôte (`%`) ou le mot de passe selon vos besoins.
+2. Définissez les variables d'environnement backend (`MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD`) pour pointer vers la base nouvellement créée.
+3. Démarrez l'API : lors du premier lancement elle exécutera les commandes `CREATE TABLE IF NOT EXISTS` nécessaires et préparera automatiquement le schéma.
 
 ## Architecture
 Le projet est structuré en deux sous-répertoires indépendants :
-- `app/` contient une API HTTP Node.js minimaliste (sans Express) qui utilise les modules natifs, un routeur maison et une base SQLite. Les choix techniques favorisent la portabilité (pas de dépendances externes) tout en offrant les fonctionnalités essentielles : authentification JWT, persistance des évènements/participants et orchestration du tirage avec envoi d'e-mails (actuellement loggés en console).
+- `app/` contient une API HTTP Node.js minimaliste (sans Express) qui utilise les modules natifs, un routeur maison et une base MySQL. Les choix techniques favorisent la portabilité (pas de dépendances externes) tout en offrant les fonctionnalités essentielles : authentification JWT, persistance des évènements/participants et orchestration du tirage avec envoi d'e-mails (actuellement loggés en console).
 - `web/` regroupe une application React créée avec Create React App. L'interface s'appuie sur Bootstrap stylé via Sass pour accélérer la mise en forme, proposer un design responsive et un thème sombre piloté par attribut `data-theme`. Les appels API transitent via `fetch` et les services définis dans `src/services/api.js`, garantissant une séparation claire entre logique métier backend et expérience utilisateur frontend.
 
 Cette séparation nette facilite le déploiement indépendant : l'API peut être hébergée sur un serveur Node.js tandis que le frontend peut être servi en mode statique depuis n'importe quel hébergeur.
