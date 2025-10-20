@@ -616,7 +616,7 @@ async function createEvent(req, res) {
   for (const participant of validation.participants) {
     await executeSql(
       `INSERT INTO participants (event_id, name, email, created_at)
-       VALUES (?, ?, ?, ?)` ,
+       VALUES (?, ?, ?, ?)`,
       [eventId, participant.name, participant.email, createdAt]
     );
   }
@@ -632,6 +632,124 @@ async function createEvent(req, res) {
       createdAt: toIsoString(createdAt),
       participants: validation.participants,
     },
+  });
+}
+
+async function updateEventDetails(req, res) {
+  const eventId = Number(req.params.id);
+  if (!eventId) {
+    return sendBadRequest(res, 'Identifiant évènement invalide');
+  }
+
+  const event = await getEventForOwner(eventId, req.user.userId);
+  if (!event) {
+    return sendNotFound(res, "Évènement introuvable");
+  }
+
+  const name = String(req.body.name || '').trim();
+  const description = String(req.body.description || '').trim() || null;
+  const rawBudget = String(req.body.budget ?? '').trim();
+  const location = String(req.body.location || '').trim();
+  const rawEventDate = req.body.eventDate;
+
+  if (!name) {
+    return sendBadRequest(res, "Le nom de l'évènement est obligatoire", {
+      fieldErrors: { title: "Le nom de l'évènement est obligatoire" },
+      step: 'details',
+    });
+  }
+
+  if (!rawBudget) {
+    return sendBadRequest(res, 'Le budget maximum est obligatoire.', {
+      fieldErrors: { budget: 'Le budget maximum est obligatoire.' },
+      step: 'details',
+    });
+  }
+
+  const budget = Number(rawBudget);
+  if (!Number.isFinite(budget) || budget <= 0) {
+    return sendBadRequest(res, 'Le budget doit être un montant positif.', {
+      fieldErrors: { budget: 'Le budget doit être un montant positif.' },
+      step: 'details',
+    });
+  }
+
+  if (!location) {
+    return sendBadRequest(res, 'Le lieu de l’évènement est obligatoire.', {
+      fieldErrors: { location: 'Le lieu de l’évènement est obligatoire.' },
+      step: 'details',
+    });
+  }
+
+  let eventDate = null;
+  if (rawEventDate) {
+    const parsedDate = new Date(rawEventDate);
+    if (Number.isNaN(parsedDate.getTime())) {
+      return sendBadRequest(res, "Date de l'évènement invalide", {
+        fieldErrors: { deadline: "Date de l'évènement invalide" },
+        step: 'details',
+      });
+    }
+    eventDate = formatDateTime(parsedDate);
+  }
+
+  await executeSql(
+    `UPDATE events
+     SET name = ?, description = ?, event_date = ?, budget = ?, location = ?
+     WHERE id = ?`,
+    [name, description, eventDate, budget, location, eventId]
+  );
+
+  respondJson(res, 200, {
+    event: {
+      ...event,
+      name,
+      description,
+      budget,
+      location,
+      eventDate: toIsoString(eventDate),
+    },
+  });
+}
+
+async function replaceEventParticipants(req, res) {
+  const eventId = Number(req.params.id);
+  if (!eventId) {
+    return sendBadRequest(res, 'Identifiant évènement invalide');
+  }
+
+  const event = await getEventForOwner(eventId, req.user.userId);
+  if (!event) {
+    return sendNotFound(res, "Évènement introuvable");
+  }
+
+  const participantsInput = Array.isArray(req.body.participants)
+    ? req.body.participants
+    : [];
+  const validation = validateParticipants(participantsInput);
+
+  if (!validation.valid) {
+    return sendBadRequest(res, validation.error || 'Participants invalides', {
+      fieldErrors: validation.fieldErrors || { participants: validation.error },
+      step: 'participants',
+    });
+  }
+
+  await executeSql('DELETE FROM participants WHERE event_id = ?', [eventId]);
+
+  const createdAt = nowDateTime();
+  for (const participant of validation.participants) {
+    await executeSql(
+      `INSERT INTO participants (event_id, name, email, created_at)
+       VALUES (?, ?, ?, ?)`,
+      [eventId, participant.name, participant.email, createdAt]
+    );
+  }
+
+  await executeSql('UPDATE events SET draw_generated = 0 WHERE id = ?', [eventId]);
+
+  respondJson(res, 200, {
+    participants: validation.participants,
   });
 }
 
@@ -1087,6 +1205,12 @@ app.use(jsonBodyParser);
 app.post('/api/auth/register', (req, res) => registerUser(req, res));
 app.post('/api/auth/login', (req, res) => loginUser(req, res));
 app.post('/api/events', authMiddleware, (req, res) => createEvent(req, res));
+app.patch('/api/events/:id', authMiddleware, (req, res) =>
+  updateEventDetails(req, res)
+);
+app.put('/api/events/:id/participants', authMiddleware, (req, res) =>
+  replaceEventParticipants(req, res)
+);
 app.get('/api/events', authMiddleware, (req, res) => listEvents(req, res));
 app.post('/api/events/:id/draw', authMiddleware, (req, res) => triggerDraw(req, res));
 app.get('/api/events/:id/status', authMiddleware, (req, res) => getEventStatus(req, res));

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   fetchNotifications,
   triggerDraw as triggerEventDraw,
+  updateEventDetails as updateEventDetailsRequest,
+  updateEventParticipants as updateEventParticipantsRequest,
 } from '../../services/api';
 
 const getInitialDrawState = () => ({
@@ -46,6 +48,74 @@ const formatDateTime = (value) => {
   return date.toLocaleString();
 };
 
+const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const normalizeDateInputValue = (value) => {
+  if (!value) {
+    return '';
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      return trimmed;
+    }
+    const parsed = new Date(trimmed);
+    if (!Number.isNaN(parsed.getTime())) {
+      const year = parsed.getFullYear();
+      const month = `${parsed.getMonth() + 1}`.padStart(2, '0');
+      const day = `${parsed.getDate()}`.padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+    return '';
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return '';
+  }
+  const year = parsed.getFullYear();
+  const month = `${parsed.getMonth() + 1}`.padStart(2, '0');
+  const day = `${parsed.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const formatDate = (value) => {
+  if (!value) {
+    return '';
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      const [year, month, day] = trimmed.split('-');
+      return `${day}/${month}/${year}`;
+    }
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toLocaleDateString();
+};
+
+const buildDetailsFormFromEvent = (summary) => ({
+  title: String(summary?.title ?? summary?.name ?? '').trim(),
+  deadline: normalizeDateInputValue(summary?.deadline ?? summary?.eventDate ?? ''),
+  budget:
+    summary?.budget !== undefined && summary?.budget !== null
+      ? String(summary.budget)
+      : '',
+  location: String(summary?.location ?? ''),
+});
+
+const buildParticipantsFromEvent = (summary) => {
+  if (!Array.isArray(summary?.participants)) {
+    return [];
+  }
+  return summary.participants.map((participant) => ({
+    name: String(participant?.name ?? ''),
+    email: String(participant?.email ?? ''),
+  }));
+};
+
 function EventDashboard({
   eventSummary,
   creator,
@@ -53,19 +123,61 @@ function EventDashboard({
   onCreateAnotherEvent,
   onBackHome,
 }) {
+  const [currentEvent, setCurrentEvent] = useState(eventSummary || null);
   const [drawState, setDrawState] = useState(getInitialDrawState);
   const [notificationsState, setNotificationsState] = useState(
     getInitialNotificationsState
   );
   const [shareState, setShareState] = useState(getInitialShareState);
+  const [isEditingDetails, setIsEditingDetails] = useState(false);
+  const [detailsForm, setDetailsForm] = useState(() =>
+    buildDetailsFormFromEvent(eventSummary)
+  );
+  const [detailsErrors, setDetailsErrors] = useState({});
+  const [detailsStatus, setDetailsStatus] = useState({
+    saving: false,
+    success: '',
+    error: '',
+  });
+  const [isEditingParticipants, setIsEditingParticipants] = useState(false);
+  const [participantsForm, setParticipantsForm] = useState(() =>
+    buildParticipantsFromEvent(eventSummary)
+  );
+  const [participantsErrors, setParticipantsErrors] = useState({
+    global: '',
+    items: {},
+  });
+  const [participantsStatus, setParticipantsStatus] = useState({
+    saving: false,
+    success: '',
+    error: '',
+  });
 
-  const eventId = eventSummary?.id || null;
+  const eventId = currentEvent?.id || null;
 
   const participants = useMemo(() => {
-    return Array.isArray(eventSummary?.participants)
-      ? eventSummary.participants
+    return Array.isArray(currentEvent?.participants)
+      ? currentEvent.participants
       : [];
-  }, [eventSummary?.participants]);
+  }, [currentEvent?.participants]);
+
+  useEffect(() => {
+    setCurrentEvent(eventSummary || null);
+  }, [eventSummary]);
+
+  useEffect(() => {
+    if (!isEditingDetails) {
+      setDetailsForm(buildDetailsFormFromEvent(currentEvent));
+      setDetailsErrors({});
+    }
+  }, [currentEvent, isEditingDetails]);
+
+  useEffect(() => {
+    if (!isEditingParticipants) {
+      setParticipantsForm(buildParticipantsFromEvent(currentEvent));
+      setParticipantsErrors({ global: '', items: {} });
+    }
+  }, [currentEvent, isEditingParticipants]);
 
   const resolveParticipantLabel = useCallback(
     (participantId) => {
@@ -126,6 +238,379 @@ function EventDashboard({
     }
   }, [authToken, eventId]);
 
+  const handleDetailsFieldChange = (event) => {
+    const { name, value } = event.target;
+    setDetailsForm((previous) => ({ ...previous, [name]: value }));
+    setDetailsErrors((previous) => {
+      if (!previous[name]) {
+        return previous;
+      }
+      const nextErrors = { ...previous };
+      delete nextErrors[name];
+      return nextErrors;
+    });
+    setDetailsStatus((previous) => ({ ...previous, error: '' }));
+  };
+
+  const validateDetailsForm = useCallback(() => {
+    const nextErrors = {};
+    const trimmedTitle = String(detailsForm.title || '').trim();
+    if (!trimmedTitle) {
+      nextErrors.title = 'Indiquez un nom reconnaissable pour votre évènement.';
+    }
+
+    if (!detailsForm.deadline) {
+      nextErrors.deadline = 'La date limite est obligatoire.';
+    } else {
+      const deadlineDate = new Date(detailsForm.deadline);
+      const now = new Date();
+      now.setHours(0, 0, 0, 0);
+      if (Number.isNaN(deadlineDate.getTime())) {
+        nextErrors.deadline = 'La date limite doit être valide.';
+      } else if (deadlineDate < now) {
+        nextErrors.deadline = 'La date doit être dans le futur.';
+      }
+    }
+
+    if (!detailsForm.budget) {
+      nextErrors.budget = 'Le budget maximum est obligatoire.';
+    } else if (
+      Number.isNaN(Number(detailsForm.budget)) ||
+      Number(detailsForm.budget) <= 0
+    ) {
+      nextErrors.budget = 'Le budget doit être un montant positif.';
+    }
+
+    const trimmedLocation = String(detailsForm.location || '').trim();
+    if (!trimmedLocation) {
+      nextErrors.location = 'Merci de préciser le lieu de remise des cadeaux.';
+    }
+
+    setDetailsErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
+      return null;
+    }
+
+    return {
+      title: trimmedTitle,
+      deadline: detailsForm.deadline,
+      budget: Number(detailsForm.budget),
+      location: trimmedLocation,
+    };
+  }, [detailsForm]);
+
+  const handleSubmitDetails = async (submitEvent) => {
+    submitEvent.preventDefault();
+    const normalized = validateDetailsForm();
+    if (!normalized) {
+      return;
+    }
+
+    if (!eventId) {
+      setDetailsStatus({
+        saving: false,
+        success: '',
+        error: "Identifiant de l’évènement introuvable.",
+      });
+      return;
+    }
+
+    if (!authToken) {
+      setDetailsStatus({
+        saving: false,
+        success: '',
+        error: 'Authentification requise pour modifier les détails.',
+      });
+      return;
+    }
+
+    setDetailsStatus({ saving: true, success: '', error: '' });
+    try {
+      const response = await updateEventDetailsRequest(
+        eventId,
+        {
+          name: normalized.title,
+          eventDate: normalized.deadline || null,
+          budget: normalized.budget,
+          location: normalized.location,
+        },
+        authToken
+      );
+      const updatedEvent = response?.event || {};
+      const baseEvent = currentEvent ? { ...currentEvent } : {};
+      const nextEvent = {
+        ...baseEvent,
+        ...updatedEvent,
+        title: updatedEvent.name ?? normalized.title,
+        name: updatedEvent.name ?? normalized.title,
+        deadline: normalizeDateInputValue(
+          updatedEvent.eventDate ?? normalized.deadline
+        ),
+        eventDate: updatedEvent.eventDate ?? baseEvent.eventDate ?? null,
+        budget: updatedEvent.budget ?? normalized.budget,
+        location: updatedEvent.location ?? normalized.location,
+        description:
+          updatedEvent.description ?? baseEvent.description ?? null,
+      };
+      setCurrentEvent(nextEvent);
+      setDetailsErrors({});
+      setIsEditingDetails(false);
+      setDetailsStatus({
+        saving: false,
+        success: 'Détails mis à jour avec succès.',
+        error: '',
+      });
+    } catch (error) {
+      const fieldErrors =
+        error?.details?.fieldErrors &&
+        typeof error.details.fieldErrors === 'object'
+          ? error.details.fieldErrors
+          : {};
+      const nextErrors = {};
+      if (fieldErrors.title) {
+        nextErrors.title = fieldErrors.title;
+      }
+      if (fieldErrors.deadline) {
+        nextErrors.deadline = fieldErrors.deadline;
+      }
+      if (fieldErrors.budget) {
+        nextErrors.budget = fieldErrors.budget;
+      }
+      if (fieldErrors.location) {
+        nextErrors.location = fieldErrors.location;
+      }
+      if (Object.keys(nextErrors).length > 0) {
+        setDetailsErrors(nextErrors);
+      }
+      setDetailsStatus({
+        saving: false,
+        success: '',
+        error:
+          error?.message ||
+          "Impossible de mettre à jour les détails de l’évènement.",
+      });
+    }
+  };
+
+  const handleStartEditDetails = () => {
+    setDetailsForm(buildDetailsFormFromEvent(currentEvent));
+    setDetailsErrors({});
+    setDetailsStatus((previous) => ({ ...previous, error: '', success: '' }));
+    setIsEditingDetails(true);
+  };
+
+  const handleCancelEditDetails = () => {
+    setDetailsForm(buildDetailsFormFromEvent(currentEvent));
+    setDetailsErrors({});
+    setDetailsStatus((previous) => ({ ...previous, error: '' }));
+    setIsEditingDetails(false);
+  };
+
+  const handleParticipantFieldChange = (index, field, value) => {
+    setParticipantsForm((previous) =>
+      previous.map((participant, idx) =>
+        idx === index ? { ...participant, [field]: value } : participant
+      )
+    );
+    setParticipantsErrors((previous) => {
+      const nextItems = { ...previous.items };
+      if (nextItems[index]) {
+        const nextFieldErrors = { ...nextItems[index] };
+        delete nextFieldErrors[field];
+        if (Object.keys(nextFieldErrors).length === 0) {
+          delete nextItems[index];
+        } else {
+          nextItems[index] = nextFieldErrors;
+        }
+      }
+      return { global: '', items: nextItems };
+    });
+    setParticipantsStatus((previous) => ({ ...previous, error: '' }));
+  };
+
+  const handleAddParticipantRow = () => {
+    setParticipantsForm((previous) => [...previous, { name: '', email: '' }]);
+    setParticipantsErrors((previous) => ({ ...previous, global: '' }));
+  };
+
+  const handleRemoveParticipantRow = (index) => {
+    setParticipantsForm((previous) =>
+      previous.filter((_, idx) => idx !== index)
+    );
+    setParticipantsErrors((previous) => {
+      const nextItems = {};
+      Object.entries(previous.items).forEach(([key, value]) => {
+        const numericKey = Number(key);
+        if (Number.isNaN(numericKey) || numericKey === index) {
+          return;
+        }
+        const nextKey = numericKey > index ? numericKey - 1 : numericKey;
+        nextItems[nextKey] = value;
+      });
+      return { global: '', items: nextItems };
+    });
+    setParticipantsStatus((previous) => ({ ...previous, error: '' }));
+  };
+
+  const validateParticipantsForm = useCallback(() => {
+    const nextErrors = { global: '', items: {} };
+    const emailOccurrences = new Map();
+
+    participantsForm.forEach((participant, index) => {
+      const trimmedName = String(participant?.name ?? '').trim();
+      const rawEmail = String(participant?.email ?? '').trim();
+      const itemErrors = {};
+
+      if (!trimmedName) {
+        itemErrors.name = 'Le prénom ou surnom est requis.';
+      }
+
+      if (!rawEmail) {
+        itemErrors.email = "L'adresse e-mail est requise.";
+      } else if (!emailRegex.test(rawEmail)) {
+        itemErrors.email = 'Adresse e-mail invalide.';
+      }
+
+      if (rawEmail) {
+        const normalizedEmail = rawEmail.toLowerCase();
+        const indexes = emailOccurrences.get(normalizedEmail) || [];
+        indexes.push(index);
+        emailOccurrences.set(normalizedEmail, indexes);
+      }
+
+      if (Object.keys(itemErrors).length > 0) {
+        nextErrors.items[index] = itemErrors;
+      }
+    });
+
+    emailOccurrences.forEach((indexes, email) => {
+      if (!email || indexes.length < 2) {
+        return;
+      }
+      indexes.forEach((participantIndex) => {
+        const existingErrors = nextErrors.items[participantIndex] || {};
+        if (
+          !existingErrors.email ||
+          existingErrors.email === "L'adresse e-mail est requise."
+        ) {
+          nextErrors.items[participantIndex] = {
+            ...existingErrors,
+            email: 'Ce participant est déjà présent.',
+          };
+        }
+      });
+    });
+
+    const normalizedParticipants = participantsForm
+      .map((participant, index) => {
+        if (nextErrors.items[index]) {
+          return null;
+        }
+        return {
+          name: String(participant?.name ?? '').trim(),
+          email: String(participant?.email ?? '').trim().toLowerCase(),
+        };
+      })
+      .filter(Boolean);
+
+    if (participantsForm.length < 2) {
+      nextErrors.global =
+        'Ajoutez au moins deux participants pour lancer un tirage.';
+    } else if (normalizedParticipants.length < 2) {
+      nextErrors.global =
+        'Ajoutez au moins deux participants valides pour lancer un tirage.';
+    }
+
+    setParticipantsErrors(nextErrors);
+    return {
+      valid: Object.keys(nextErrors.items).length === 0 && !nextErrors.global,
+      participants: normalizedParticipants,
+    };
+  }, [participantsForm]);
+
+  const handleSubmitParticipants = async (submitEvent) => {
+    submitEvent.preventDefault();
+    const validation = validateParticipantsForm();
+    if (!validation.valid) {
+      return;
+    }
+
+    if (!eventId) {
+      setParticipantsStatus({
+        saving: false,
+        success: '',
+        error: "Identifiant de l’évènement introuvable.",
+      });
+      return;
+    }
+
+    if (!authToken) {
+      setParticipantsStatus({
+        saving: false,
+        success: '',
+        error: 'Authentification requise pour modifier les participants.',
+      });
+      return;
+    }
+
+    setParticipantsStatus({ saving: true, success: '', error: '' });
+    try {
+      const response = await updateEventParticipantsRequest(
+        eventId,
+        validation.participants,
+        authToken
+      );
+      const savedParticipants = Array.isArray(response?.participants)
+        ? response.participants
+        : validation.participants;
+      const baseEvent = currentEvent ? { ...currentEvent } : {};
+      const nextEvent = {
+        ...baseEvent,
+        participants: savedParticipants,
+      };
+      setCurrentEvent(nextEvent);
+      setIsEditingParticipants(false);
+      setParticipantsErrors({ global: '', items: {} });
+      setParticipantsStatus({
+        saving: false,
+        success: 'Participants mis à jour avec succès.',
+        error: '',
+      });
+    } catch (error) {
+      const fieldErrors =
+        error?.details?.fieldErrors &&
+        typeof error.details.fieldErrors === 'object'
+          ? error.details.fieldErrors
+          : {};
+      const globalError = fieldErrors.participants || '';
+      setParticipantsErrors((previous) => ({
+        global: globalError || previous.global,
+        items: { ...previous.items },
+      }));
+      setParticipantsStatus({
+        saving: false,
+        success: '',
+        error:
+          error?.message ||
+          'Impossible de mettre à jour la liste des participants.',
+      });
+    }
+  };
+
+  const handleStartEditParticipants = () => {
+    setParticipantsForm(buildParticipantsFromEvent(currentEvent));
+    setParticipantsErrors({ global: '', items: {} });
+    setParticipantsStatus((previous) => ({ ...previous, error: '', success: '' }));
+    setIsEditingParticipants(true);
+  };
+
+  const handleCancelEditParticipants = () => {
+    setParticipantsForm(buildParticipantsFromEvent(currentEvent));
+    setParticipantsErrors({ global: '', items: {} });
+    setParticipantsStatus((previous) => ({ ...previous, error: '' }));
+    setIsEditingParticipants(false);
+  };
+
   const handleTriggerDraw = useCallback(async () => {
     if (!eventId) {
       setDrawState({
@@ -162,7 +647,7 @@ function EventDashboard({
   }, [loadNotifications]);
 
   const handleShareEvent = useCallback(async () => {
-    if (!eventSummary) {
+    if (!currentEvent) {
       setShareState({
         loading: false,
         status: '',
@@ -172,8 +657,8 @@ function EventDashboard({
     }
     setShareState({ loading: true, status: '', error: '' });
     try {
-      const title = eventSummary.name || eventSummary.title || 'Secret Santa';
-      const organizer = eventSummary.creatorEmail || creator?.email || '';
+      const title = currentEvent.name || currentEvent.title || 'Secret Santa';
+      const organizer = currentEvent.creatorEmail || creator?.email || '';
       const shareUrl =
         typeof window !== 'undefined' && eventId
           ? `${window.location.origin}/events/${eventId}`
@@ -221,7 +706,7 @@ function EventDashboard({
         error: error?.message || 'Le partage a échoué.',
       });
     }
-  }, [creator?.email, eventId, eventSummary]);
+  }, [creator?.email, currentEvent, eventId]);
 
   useEffect(() => {
     setDrawState(getInitialDrawState());
@@ -238,42 +723,324 @@ function EventDashboard({
             Votre Secret Santa est prêt. Nous avons bien enregistré la date
             limite, le budget ainsi que la liste des participants.
           </p>
-          {eventSummary && (
-            <dl className="table-summary mb-4">
-              <div>
-                <dt>Créateur</dt>
-                <dd>{eventSummary.creatorEmail || creator?.email}</dd>
+          <section className="mb-4">
+            <div className="d-flex justify-content-between align-items-center mb-3">
+              <h2 className="fs-5 mb-0">Détails de l’évènement</h2>
+              {currentEvent && (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline-secondary"
+                  onClick={
+                    isEditingDetails ? handleCancelEditDetails : handleStartEditDetails
+                  }
+                  disabled={detailsStatus.saving}
+                >
+                  {isEditingDetails ? 'Fermer' : 'Modifier'}
+                </button>
+              )}
+            </div>
+            {detailsStatus.success && !isEditingDetails && (
+              <div className="alert alert-success" role="status">
+                {detailsStatus.success}
               </div>
-              <div>
-                <dt>Titre</dt>
-                <dd>{eventSummary.title}</dd>
+            )}
+            {detailsStatus.error && !isEditingDetails && (
+              <div className="alert alert-danger" role="alert">
+                {detailsStatus.error}
               </div>
-              <div>
-                <dt>Date limite</dt>
-                <dd>{eventSummary.deadline}</dd>
+            )}
+            {isEditingDetails ? (
+              <form
+                className="d-flex flex-column gap-3"
+                onSubmit={handleSubmitDetails}
+                noValidate
+              >
+                <div>
+                  <label className="form-label" htmlFor="dashboard-title">
+                    Nom de l’évènement
+                  </label>
+                  <input
+                    id="dashboard-title"
+                    name="title"
+                    type="text"
+                    value={detailsForm.title}
+                    onChange={handleDetailsFieldChange}
+                    className={`form-control${detailsErrors.title ? ' is-invalid' : ''}`}
+                    placeholder="Secret Santa de la famille"
+                    disabled={detailsStatus.saving}
+                  />
+                  {detailsErrors.title && (
+                    <div className="form-error">{detailsErrors.title}</div>
+                  )}
+                </div>
+                <div className="row g-4">
+                  <div className="col-md-6">
+                    <label className="form-label" htmlFor="dashboard-deadline">
+                      Date limite d’envoi
+                    </label>
+                    <input
+                      id="dashboard-deadline"
+                      name="deadline"
+                      type="date"
+                      value={detailsForm.deadline}
+                      onChange={handleDetailsFieldChange}
+                      className={`form-control${detailsErrors.deadline ? ' is-invalid' : ''}`}
+                      disabled={detailsStatus.saving}
+                    />
+                    {detailsErrors.deadline && (
+                      <div className="form-error">{detailsErrors.deadline}</div>
+                    )}
+                  </div>
+                  <div className="col-md-6">
+                    <label className="form-label" htmlFor="dashboard-budget">
+                      Budget maximum (en €)
+                    </label>
+                    <input
+                      id="dashboard-budget"
+                      name="budget"
+                      type="number"
+                      min="1"
+                      step="1"
+                      value={detailsForm.budget}
+                      onChange={handleDetailsFieldChange}
+                      className={`form-control${detailsErrors.budget ? ' is-invalid' : ''}`}
+                      disabled={detailsStatus.saving}
+                    />
+                    {detailsErrors.budget && (
+                      <div className="form-error">{detailsErrors.budget}</div>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <label className="form-label" htmlFor="dashboard-location">
+                    Lieu de l’échange
+                  </label>
+                  <input
+                    id="dashboard-location"
+                    name="location"
+                    type="text"
+                    value={detailsForm.location}
+                    onChange={handleDetailsFieldChange}
+                    className={`form-control${detailsErrors.location ? ' is-invalid' : ''}`}
+                    placeholder="Chez Mamie, 24 décembre"
+                    disabled={detailsStatus.saving}
+                  />
+                  {detailsErrors.location && (
+                    <div className="form-error">{detailsErrors.location}</div>
+                  )}
+                </div>
+                {detailsStatus.error && isEditingDetails && (
+                  <div className="alert alert-danger" role="alert">
+                    {detailsStatus.error}
+                  </div>
+                )}
+                <div className="d-flex justify-content-end gap-2">
+                  <button
+                    type="button"
+                    className="btn btn-outline-secondary"
+                    onClick={handleCancelEditDetails}
+                    disabled={detailsStatus.saving}
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    disabled={detailsStatus.saving}
+                  >
+                    {detailsStatus.saving ? 'Enregistrement…' : 'Enregistrer'}
+                  </button>
+                </div>
+              </form>
+            ) : currentEvent ? (
+              <dl className="table-summary mb-0">
+                <div>
+                  <dt>Créateur</dt>
+                  <dd>{currentEvent.creatorEmail || creator?.email}</dd>
+                </div>
+                <div>
+                  <dt>Titre</dt>
+                  <dd>{currentEvent.title || currentEvent.name}</dd>
+                </div>
+                <div>
+                  <dt>Date limite</dt>
+                  <dd>{formatDate(currentEvent.deadline || currentEvent.eventDate)}</dd>
+                </div>
+                <div>
+                  <dt>Budget maximum</dt>
+                  <dd>
+                    {currentEvent.budget !== undefined && currentEvent.budget !== null
+                      ? `${currentEvent.budget} €`
+                      : 'Non défini'}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Lieu</dt>
+                  <dd>{currentEvent.location || 'Non défini'}</dd>
+                </div>
+              </dl>
+            ) : (
+              <p className="text-muted mb-0">
+                Aucun évènement sélectionné pour le moment.
+              </p>
+            )}
+          </section>
+          <section className="mb-4">
+            <div className="d-flex justify-content-between align-items-center mb-3">
+              <h2 className="fs-5 mb-0">Participants</h2>
+              {currentEvent && (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline-secondary"
+                  onClick={
+                    isEditingParticipants
+                      ? handleCancelEditParticipants
+                      : handleStartEditParticipants
+                  }
+                  disabled={participantsStatus.saving}
+                >
+                  {isEditingParticipants ? 'Fermer' : 'Modifier la liste'}
+                </button>
+              )}
+            </div>
+            {participantsStatus.success && !isEditingParticipants && (
+              <div className="alert alert-success" role="status">
+                {participantsStatus.success}
               </div>
-              <div>
-                <dt>Budget maximum</dt>
-                <dd>{eventSummary.budget} €</dd>
+            )}
+            {participantsStatus.error && !isEditingParticipants && (
+              <div className="alert alert-danger" role="alert">
+                {participantsStatus.error}
               </div>
-              <div>
-                <dt>Lieu</dt>
-                <dd>{eventSummary.location}</dd>
-              </div>
-              <div>
-                <dt>Participants</dt>
-                <dd>
-                  <ul className="list-group">
-                    {participants.map((participant) => (
-                      <li className="list-group-item" key={participant.email}>
-                        <span>{`${participant.name} — ${participant.email}`}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </dd>
-              </div>
-            </dl>
-          )}
+            )}
+            {isEditingParticipants ? (
+              <form
+                className="d-flex flex-column gap-3"
+                onSubmit={handleSubmitParticipants}
+                noValidate
+              >
+                <div className="d-flex flex-column gap-3">
+                  {participantsForm.length === 0 ? (
+                    <p className="text-muted mb-0">
+                      Ajoutez vos premiers participants pour lancer le tirage.
+                    </p>
+                  ) : (
+                    participantsForm.map((participant, index) => (
+                      <div className="row g-3 align-items-end" key={`participant-${index}`}>
+                        <div className="col-md-5">
+                          <label className="form-label" htmlFor={`participant-name-${index}`}>
+                            Nom
+                          </label>
+                          <input
+                            id={`participant-name-${index}`}
+                            name="name"
+                            type="text"
+                            value={participant.name}
+                            onChange={(event) =>
+                              handleParticipantFieldChange(index, 'name', event.target.value)
+                            }
+                            className={`form-control${
+                              participantsErrors.items?.[index]?.name ? ' is-invalid' : ''
+                            }`}
+                            placeholder="Ex. Alice"
+                            disabled={participantsStatus.saving}
+                          />
+                          {participantsErrors.items?.[index]?.name && (
+                            <div className="form-error">
+                              {participantsErrors.items?.[index]?.name}
+                            </div>
+                          )}
+                        </div>
+                        <div className="col-md-5">
+                          <label className="form-label" htmlFor={`participant-email-${index}`}>
+                            Adresse e-mail
+                          </label>
+                          <input
+                            id={`participant-email-${index}`}
+                            name="email"
+                            type="email"
+                            value={participant.email}
+                            onChange={(event) =>
+                              handleParticipantFieldChange(index, 'email', event.target.value)
+                            }
+                            className={`form-control${
+                              participantsErrors.items?.[index]?.email ? ' is-invalid' : ''
+                            }`}
+                            placeholder="alice@example.com"
+                            disabled={participantsStatus.saving}
+                          />
+                          {participantsErrors.items?.[index]?.email && (
+                            <div className="form-error">
+                              {participantsErrors.items?.[index]?.email}
+                            </div>
+                          )}
+                        </div>
+                        <div className="col-md-2">
+                          <button
+                            type="button"
+                            className="btn btn-outline-danger w-100"
+                            onClick={() => handleRemoveParticipantRow(index)}
+                            disabled={participantsStatus.saving}
+                          >
+                            Retirer
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+                {participantsErrors.global && (
+                  <div className="alert alert-warning mb-0" role="alert">
+                    {participantsErrors.global}
+                  </div>
+                )}
+                {participantsStatus.error && (
+                  <div className="alert alert-danger mb-0" role="alert">
+                    {participantsStatus.error}
+                  </div>
+                )}
+                <div className="d-flex flex-column flex-md-row justify-content-between align-items-stretch gap-2">
+                  <button
+                    type="button"
+                    className="btn btn-outline-secondary"
+                    onClick={handleAddParticipantRow}
+                    disabled={participantsStatus.saving}
+                  >
+                    Ajouter un participant
+                  </button>
+                  <div className="d-flex justify-content-end gap-2">
+                    <button
+                      type="button"
+                      className="btn btn-outline-secondary"
+                      onClick={handleCancelEditParticipants}
+                      disabled={participantsStatus.saving}
+                    >
+                      Annuler
+                    </button>
+                    <button
+                      type="submit"
+                      className="btn btn-primary"
+                      disabled={participantsStatus.saving}
+                    >
+                      {participantsStatus.saving ? 'Enregistrement…' : 'Enregistrer'}
+                    </button>
+                  </div>
+                </div>
+              </form>
+            ) : participants.length > 0 ? (
+              <ul className="list-group mb-0">
+                {participants.map((participant) => (
+                  <li className="list-group-item" key={participant.email}>
+                    {participant.name} — {participant.email}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-muted mb-0">
+                Aucun participant enregistré pour le moment.
+              </p>
+            )}
+          </section>
           {eventId && (
             <section className="mb-4">
               <h2 className="fs-5 mb-3">Actions rapides</h2>
@@ -313,7 +1080,9 @@ function EventDashboard({
               {drawState.result && !drawState.error && (
                 <div className="alert alert-success mt-3" role="status">
                   <p className="mb-2">
-                    Tirage effectué pour {drawState.result.event?.name || eventSummary.title}.
+                    Tirage effectué pour
+                    {' '}
+                    {drawState.result.event?.name || currentEvent?.title || currentEvent?.name}.
                   </p>
                   {Array.isArray(drawState.result.status) && drawState.result.status.length > 0 ? (
                     <ul className="list-group">
