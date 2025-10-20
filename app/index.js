@@ -514,7 +514,11 @@ async function loginUser(req, res) {
 
 function validateParticipants(participants) {
   if (!Array.isArray(participants) || participants.length < 2) {
-    return { valid: false, error: 'Ajoutez au moins deux participants pour organiser un tirage.' };
+    return {
+      valid: false,
+      error: 'Ajoutez au moins deux participants pour organiser un tirage.',
+      fieldErrors: { participants: 'Ajoutez au moins deux participants pour organiser un tirage.' },
+    };
   }
   const normalized = [];
   const emails = new Set();
@@ -522,13 +526,27 @@ function validateParticipants(participants) {
     const name = String(participant.name || '').trim();
     const email = sanitizeEmail(participant.email);
     if (!name) {
-      return { valid: false, error: 'Chaque participant doit avoir un nom.' };
+      return {
+        valid: false,
+        error: 'Chaque participant doit avoir un nom.',
+        fieldErrors: { participants: 'Chaque participant doit avoir un nom.' },
+      };
     }
     if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
-      return { valid: false, error: `Adresse email invalide pour ${name || 'participant'}.` };
+      return {
+        valid: false,
+        error: `Adresse email invalide pour ${name || 'participant'}.`,
+        fieldErrors: {
+          participants: `Adresse email invalide pour ${name || 'participant'}.`,
+        },
+      };
     }
     if (emails.has(email)) {
-      return { valid: false, error: `Adresse email en double détectée: ${email}.` };
+      return {
+        valid: false,
+        error: `Adresse email en double détectée: ${email}.`,
+        fieldErrors: { participants: `Adresse email en double détectée: ${email}.` },
+      };
     }
     emails.add(email);
     normalized.push({ name, email });
@@ -545,27 +563,45 @@ async function createEvent(req, res) {
   if (req.body.eventDate) {
     const parsedDate = new Date(req.body.eventDate);
     if (Number.isNaN(parsedDate.getTime())) {
-      return sendBadRequest(res, 'Date de l\'évènement invalide');
+      return sendBadRequest(res, "Date de l'évènement invalide", {
+        fieldErrors: { deadline: "Date de l'évènement invalide" },
+        step: 'details',
+      });
     }
     eventDate = formatDateTime(parsedDate);
   }
   const validation = validateParticipants(req.body.participants);
 
   if (!name) {
-    return sendBadRequest(res, "Le nom de l'évènement est obligatoire");
+    return sendBadRequest(res, "Le nom de l'évènement est obligatoire", {
+      fieldErrors: { title: "Le nom de l'évènement est obligatoire" },
+      step: 'details',
+    });
   }
   if (!rawBudget) {
-    return sendBadRequest(res, 'Le budget maximum est obligatoire.');
+    return sendBadRequest(res, 'Le budget maximum est obligatoire.', {
+      fieldErrors: { budget: 'Le budget maximum est obligatoire.' },
+      step: 'details',
+    });
   }
   const budget = Number(rawBudget);
   if (!Number.isFinite(budget) || budget <= 0) {
-    return sendBadRequest(res, 'Le budget doit être un montant positif.');
+    return sendBadRequest(res, 'Le budget doit être un montant positif.', {
+      fieldErrors: { budget: 'Le budget doit être un montant positif.' },
+      step: 'details',
+    });
   }
   if (!location) {
-    return sendBadRequest(res, 'Le lieu de l’évènement est obligatoire.');
+    return sendBadRequest(res, 'Le lieu de l’évènement est obligatoire.', {
+      fieldErrors: { location: 'Le lieu de l’évènement est obligatoire.' },
+      step: 'details',
+    });
   }
   if (!validation.valid) {
-    return sendBadRequest(res, validation.error);
+    return sendBadRequest(res, validation.error, {
+      fieldErrors: validation.fieldErrors || { participants: validation.error },
+      step: 'participants',
+    });
   }
 
   const createdAt = nowDateTime();

@@ -46,11 +46,17 @@ async function request(path, options = {}) {
   const data = isJson ? await response.json().catch(() => null) : await response.text();
 
   if (!response.ok) {
+    const errorPayload = data && typeof data === 'object' ? data : null;
     const message =
-      (data && typeof data === 'object' && data.message) ||
+      (errorPayload && (errorPayload.error || errorPayload.message)) ||
       (typeof data === 'string' && data) ||
       'Une erreur est survenue lors de la communication avec le serveur.';
-    throw new Error(message);
+    const error = new Error(message);
+    if (errorPayload && errorPayload.details) {
+      error.details = errorPayload.details;
+    }
+    error.status = response.status;
+    throw error;
   }
 
   return data;

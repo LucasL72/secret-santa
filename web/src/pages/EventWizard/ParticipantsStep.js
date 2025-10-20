@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -8,10 +8,16 @@ function ParticipantsStep({
   onNext = () => {},
   onBack = () => {},
   onCancel = () => {},
+  externalErrors = { global: '', fieldErrors: {} },
 }) {
   const [candidate, setCandidate] = useState({ name: '', email: '' });
   const [fieldErrors, setFieldErrors] = useState({});
   const [globalError, setGlobalError] = useState('');
+
+  useEffect(() => {
+    setFieldErrors(externalErrors.fieldErrors || {});
+    setGlobalError(externalErrors.global || '');
+  }, [externalErrors]);
 
   const sortedParticipants = useMemo(
     () =>
@@ -29,6 +35,14 @@ function ParticipantsStep({
   const handleCandidateChange = (event) => {
     const { name, value } = event.target;
     setCandidate((prev) => ({ ...prev, [name]: value }));
+    setFieldErrors((prev) => {
+      if (!prev[name]) {
+        return prev;
+      }
+      const nextErrors = { ...prev };
+      delete nextErrors[name];
+      return nextErrors;
+    });
   };
 
   const handleAddParticipant = (event) => {
@@ -92,7 +106,7 @@ function ParticipantsStep({
             value={candidate.name}
             onChange={handleCandidateChange}
             placeholder="Ex. Alice"
-            className="form-control"
+            className={`form-control${fieldErrors.name ? ' is-invalid' : ''}`}
           />
           {fieldErrors.name && <div className="form-error">{fieldErrors.name}</div>}
         </div>
@@ -107,7 +121,7 @@ function ParticipantsStep({
             value={candidate.email}
             onChange={handleCandidateChange}
             placeholder="alice@example.com"
-            className="form-control"
+            className={`form-control${fieldErrors.email ? ' is-invalid' : ''}`}
           />
           {fieldErrors.email && <div className="form-error">{fieldErrors.email}</div>}
         </div>

@@ -11,6 +11,13 @@ const initialDetails = {
   location: '',
 };
 
+function createEmptyServerErrors() {
+  return {
+    details: {},
+    participants: { global: '', fieldErrors: {} },
+  };
+}
+
 function EventWizard({ creator, authToken, onCancel = () => {}, onComplete }) {
   const steps = useMemo(
     () => [
@@ -27,6 +34,9 @@ function EventWizard({ creator, authToken, onCancel = () => {}, onComplete }) {
     loading: false,
     error: '',
   });
+  const [serverValidationErrors, setServerValidationErrors] = useState(() =>
+    createEmptyServerErrors()
+  );
 
   const goBack = () => {
     setCurrentStep((prev) => Math.max(prev - 1, 0));
@@ -38,6 +48,7 @@ function EventWizard({ creator, authToken, onCancel = () => {}, onComplete }) {
 
   const handleConfirm = async () => {
     setSubmission({ loading: true, error: '' });
+    setServerValidationErrors(createEmptyServerErrors());
     try {
       const normalizedBudget = (() => {
         const rawBudget = String(details.budget ?? '').trim();
@@ -62,6 +73,7 @@ function EventWizard({ creator, authToken, onCancel = () => {}, onComplete }) {
         ? eventData.participants
         : participants;
       setSubmission({ loading: false, error: '' });
+      setServerValidationErrors(createEmptyServerErrors());
       if (onComplete) {
         onComplete({
           title: details.title,
@@ -79,6 +91,32 @@ function EventWizard({ creator, authToken, onCancel = () => {}, onComplete }) {
         });
       }
     } catch (error) {
+      const rawFieldErrors = error?.details?.fieldErrors;
+      const fieldErrors =
+        rawFieldErrors && typeof rawFieldErrors === 'object' && !Array.isArray(rawFieldErrors)
+          ? rawFieldErrors
+          : {};
+      const targetStep = error?.details?.step;
+      const nextServerErrors = createEmptyServerErrors();
+      if (targetStep === 'details') {
+        nextServerErrors.details = fieldErrors;
+      } else if (targetStep === 'participants') {
+        const participantFieldErrors = { ...fieldErrors };
+        const globalParticipantError =
+          participantFieldErrors.participants || error?.message || '';
+        delete participantFieldErrors.participants;
+        nextServerErrors.participants = {
+          global: globalParticipantError,
+          fieldErrors: participantFieldErrors,
+        };
+      }
+      if (targetStep) {
+        const targetIndex = steps.findIndex((step) => step.id === targetStep);
+        if (targetIndex >= 0) {
+          setCurrentStep(targetIndex);
+        }
+      }
+      setServerValidationErrors(nextServerErrors);
       setSubmission({
         loading: false,
         error: error?.message || "Une erreur inattendue est survenue.",
@@ -95,9 +133,14 @@ function EventWizard({ creator, authToken, onCancel = () => {}, onComplete }) {
           initialValues={details}
           onSubmit={(values) => {
             setDetails(values);
+            setServerValidationErrors((prev) => ({
+              ...prev,
+              details: {},
+            }));
             goNext();
           }}
           onCancel={onCancel}
+          externalErrors={serverValidationErrors.details}
         />
       );
       break;
@@ -106,9 +149,16 @@ function EventWizard({ creator, authToken, onCancel = () => {}, onComplete }) {
         <ParticipantsStep
           participants={participants}
           onUpdate={setParticipants}
-          onNext={goNext}
+          onNext={() => {
+            setServerValidationErrors((prev) => ({
+              ...prev,
+              participants: { global: '', fieldErrors: {} },
+            }));
+            goNext();
+          }}
           onBack={goBack}
           onCancel={onCancel}
+          externalErrors={serverValidationErrors.participants}
         />
       );
       break;
