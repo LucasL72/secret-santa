@@ -100,3 +100,10 @@ export async function resendNotification(eventId, participantEmail, token) {
     authToken: token,
   });
 }
+
+export async function triggerDraw(eventId, token) {
+  return request(`/events/${eventId}/draw`, {
+    method: 'POST',
+    authToken: token,
+  });
+}
