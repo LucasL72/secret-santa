@@ -36,6 +36,7 @@ function EventWizard({
   const [currentStep, setCurrentStep] = useState(0);
   const [details, setDetails] = useState(initialDetails);
   const [participants, setParticipants] = useState([]);
+  const [participantExclusions, setParticipantExclusions] = useState([]);
   const [submission, setSubmission] = useState({
     loading: false,
     error: '',
@@ -70,6 +71,7 @@ function EventWizard({
         budget: normalizedBudget,
         location: String(details.location || '').trim() || null,
         participants,
+        exclusions: participantExclusions,
         creatorId: creator?.id || null,
         creatorEmail: creator?.email || null,
       };
@@ -78,6 +80,11 @@ function EventWizard({
       const summaryParticipants = Array.isArray(eventData.participants)
         ? eventData.participants
         : participants;
+      const summaryExclusions = Array.isArray(eventData.exclusions)
+        ? eventData.exclusions
+        : Array.isArray(participantExclusions)
+        ? participantExclusions
+        : [];
       setSubmission({ loading: false, error: '' });
       setServerValidationErrors(createEmptyServerErrors());
       if (onComplete) {
@@ -87,6 +94,7 @@ function EventWizard({
           budget: eventData.budget ?? normalizedBudget,
           location: eventData.location ?? details.location,
           participants: summaryParticipants,
+          exclusions: summaryExclusions,
           creatorId: requestPayload.creatorId,
           creatorEmail: requestPayload.creatorEmail,
           name: eventData.name ?? requestPayload.name,
@@ -154,7 +162,18 @@ function EventWizard({
       stepContent = (
         <ParticipantsStep
           participants={participants}
-          onUpdate={setParticipants}
+          exclusions={participantExclusions}
+          onUpdate={(nextParticipants) => {
+            setParticipants(nextParticipants);
+            setParticipantExclusions((prev) =>
+              prev.filter(
+                (pair) =>
+                  nextParticipants.some((item) => item.email === pair.participantA) &&
+                  nextParticipants.some((item) => item.email === pair.participantB)
+              )
+            );
+          }}
+          onExclusionsChange={setParticipantExclusions}
           onNext={() => {
             setServerValidationErrors((prev) => ({
               ...prev,
@@ -174,6 +193,7 @@ function EventWizard({
         <ConfirmationStep
           details={details}
           participants={participants}
+          exclusions={participantExclusions}
           onBack={goBack}
           onConfirm={handleConfirm}
           loading={submission.loading}

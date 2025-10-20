@@ -265,6 +265,21 @@ async function initializeDatabase() {
       CONSTRAINT fk_participants_recipient FOREIGN KEY (assigned_recipient_id) REFERENCES participants(id) ON DELETE SET NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
   );
+
+  await executeSql(
+    `CREATE TABLE IF NOT EXISTS participant_exclusions (
+      id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+      event_id INT UNSIGNED NOT NULL,
+      participant_a_id INT UNSIGNED NOT NULL,
+      participant_b_id INT UNSIGNED NOT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY unique_participant_pair (event_id, participant_a_id, participant_b_id),
+      CONSTRAINT fk_exclusions_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
+      CONSTRAINT fk_exclusions_participant_a FOREIGN KEY (participant_a_id) REFERENCES participants(id) ON DELETE CASCADE,
+      CONSTRAINT fk_exclusions_participant_b FOREIGN KEY (participant_b_id) REFERENCES participants(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+  );
 }
 
 // ---- Email sending -------------------------------------------------------
@@ -555,6 +570,119 @@ function validateParticipants(participants) {
   return { valid: true, participants: normalized };
 }
 
+function validateParticipantExclusions(participants, exclusions) {
+  if (!exclusions || exclusions.length === 0) {
+    return { valid: true, exclusions: [] };
+  }
+
+  if (!Array.isArray(exclusions)) {
+    return {
+      valid: false,
+      error: 'Format de couples invalide.',
+      fieldErrors: { exclusions: 'Format de couples invalide.' },
+    };
+  }
+
+  const participantEmails = new Set(participants.map((participant) => participant.email));
+  const normalized = [];
+  const seenPairs = new Set();
+
+  for (const pair of exclusions) {
+    if (!pair || typeof pair !== 'object') {
+      return {
+        valid: false,
+        error: 'Chaque couple doit référencer deux participants.',
+        fieldErrors: {
+          exclusions: 'Chaque couple doit référencer deux participants.',
+        },
+      };
+    }
+
+    const first = sanitizeEmail(
+      pair.participantA || pair.first || pair.a || pair.emailA || pair[0]
+    );
+    const second = sanitizeEmail(
+      pair.participantB || pair.second || pair.b || pair.emailB || pair[1]
+    );
+
+    if (!first || !second) {
+      return {
+        valid: false,
+        error: 'Sélectionnez deux participants pour former un couple.',
+        fieldErrors: {
+          exclusions: 'Sélectionnez deux participants pour former un couple.',
+        },
+      };
+    }
+
+    if (first === second) {
+      return {
+        valid: false,
+        error: 'Un participant ne peut pas être jumelé avec lui-même.',
+        fieldErrors: {
+          exclusions: 'Un participant ne peut pas être jumelé avec lui-même.',
+        },
+      };
+    }
+
+    if (!participantEmails.has(first) || !participantEmails.has(second)) {
+      return {
+        valid: false,
+        error: 'Les couples doivent correspondre à des participants existants.',
+        fieldErrors: {
+          exclusions: 'Les couples doivent correspondre à des participants existants.',
+        },
+      };
+    }
+
+    const pairKey = [first, second].sort().join('::');
+    if (seenPairs.has(pairKey)) {
+      return {
+        valid: false,
+        error: 'Ce couple est déjà défini.',
+        fieldErrors: { exclusions: 'Ce couple est déjà défini.' },
+      };
+    }
+
+    seenPairs.add(pairKey);
+    normalized.push({ participantA: first, participantB: second });
+  }
+
+  return { valid: true, exclusions: normalized };
+}
+
+async function replaceParticipantExclusions(eventId, participants, exclusions) {
+  await executeSql('DELETE FROM participant_exclusions WHERE event_id = ?', [eventId]);
+
+  if (!exclusions || exclusions.length === 0) {
+    return [];
+  }
+
+  const participantsByEmail = new Map(
+    participants.map((participant) => [sanitizeEmail(participant.email), participant.id])
+  );
+  const createdAt = nowDateTime();
+  const storedPairs = [];
+
+  for (const pair of exclusions) {
+    const firstId = participantsByEmail.get(pair.participantA);
+    const secondId = participantsByEmail.get(pair.participantB);
+    if (!firstId || !secondId || firstId === secondId) {
+      continue;
+    }
+    const [participantAId, participantBId] =
+      firstId < secondId ? [firstId, secondId] : [secondId, firstId];
+    await executeSql(
+      `INSERT INTO participant_exclusions (event_id, participant_a_id, participant_b_id, created_at)
+       VALUES (?, ?, ?, ?)`,
+      [eventId, participantAId, participantBId, createdAt]
+    );
+    storedPairs.push({ participantAId, participantBId });
+  }
+
+  return storedPairs;
+}
+
 async function createEvent(req, res) {
   const name = String(req.body.name || '').trim();
   const description = String(req.body.description || '').trim() || null;
@@ -572,6 +700,10 @@ async function createEvent(req, res) {
     eventDate = formatDateTime(parsedDate);
   }
   const validation = validateParticipants(req.body.participants);
+  const exclusionsValidation = validateParticipantExclusions(
+    validation.valid ? validation.participants : [],
+    req.body.exclusions
+  );
 
   if (!name) {
     return sendBadRequest(res, "Le nom de l'évènement est obligatoire", {
@@ -605,6 +737,15 @@ async function createEvent(req, res) {
     });
   }
 
+  if (!exclusionsValidation.valid) {
+    return sendBadRequest(res, exclusionsValidation.error, {
+      fieldErrors: exclusionsValidation.fieldErrors || {
+        exclusions: exclusionsValidation.error,
+      },
+      step: 'participants',
+    });
+  }
+
   const createdAt = nowDateTime();
   const eventInsert = await executeSql(
     `INSERT INTO events (owner_id, name, description, event_date, budget, location, created_at)
@@ -621,6 +762,22 @@ async function createEvent(req, res) {
     );
   }
 
+  const storedParticipants = (
+    await querySql(
+      `SELECT id, name, email, email_status as emailStatus, email_error as emailError,
+              email_sent_at as emailSentAt, created_at as createdAt,
+              assigned_recipient_id as assignedRecipientId
+       FROM participants WHERE event_id = ?`,
+      [eventId]
+    )
+  ).map(normalizeParticipantRow);
+
+  await replaceParticipantExclusions(
+    eventId,
+    storedParticipants,
+    exclusionsValidation.exclusions
+  );
+
   respondJson(res, 201, {
     event: {
       id: eventId,
@@ -631,6 +788,7 @@ async function createEvent(req, res) {
       location,
       createdAt: toIsoString(createdAt),
       participants: validation.participants,
+      exclusions: exclusionsValidation.exclusions,
     },
   });
 }
@@ -727,12 +885,29 @@ async function replaceEventParticipants(req, res) {
     ? req.body.participants
     : [];
   const validation = validateParticipants(participantsInput);
+  const exclusionsValidation = validateParticipantExclusions(
+    validation.valid ? validation.participants : [],
+    req.body.exclusions
+  );
 
   if (!validation.valid) {
     return sendBadRequest(res, validation.error || 'Participants invalides', {
       fieldErrors: validation.fieldErrors || { participants: validation.error },
       step: 'participants',
     });
+  }
+
+  if (!exclusionsValidation.valid) {
+    return sendBadRequest(
+      res,
+      exclusionsValidation.error || 'Couples invalides',
+      {
+        fieldErrors: exclusionsValidation.fieldErrors || {
+          exclusions: exclusionsValidation.error,
+        },
+        step: 'participants',
+      }
+    );
   }
 
   await executeSql('DELETE FROM participants WHERE event_id = ?', [eventId]);
@@ -748,8 +923,25 @@ async function replaceEventParticipants(req, res) {
 
   await executeSql('UPDATE events SET draw_generated = 0 WHERE id = ?', [eventId]);
 
+  const storedParticipants = (
+    await querySql(
+      `SELECT id, name, email, email_status as emailStatus, email_error as emailError,
+              email_sent_at as emailSentAt, created_at as createdAt,
+              assigned_recipient_id as assignedRecipientId
+       FROM participants WHERE event_id = ?`,
+      [eventId]
+    )
+  ).map(normalizeParticipantRow);
+
+  await replaceParticipantExclusions(
+    eventId,
+    storedParticipants,
+    exclusionsValidation.exclusions
+  );
+
   respondJson(res, 200, {
     participants: validation.participants,
+    exclusions: exclusionsValidation.exclusions,
   });
 }
 
@@ -762,14 +954,77 @@ function shuffleArray(array) {
   return arr;
 }
 
-function buildAssignments(participants) {
-  const shuffled = shuffleArray(participants);
-  const assignments = [];
-  for (let i = 0; i < shuffled.length; i += 1) {
-    const giver = shuffled[i];
-    const receiver = shuffled[(i + 1) % shuffled.length];
-    assignments.push({ giver, receiver });
+function buildAssignments(participants, exclusionPairs = []) {
+  const participantList = shuffleArray(participants);
+  const blockedRecipients = new Map();
+
+  for (const participant of participantList) {
+    blockedRecipients.set(participant.id, new Set([participant.id]));
   }
+
+  for (const pair of exclusionPairs || []) {
+    const giverId = Number(
+      pair.giverId ?? pair.participantAId ?? pair.participantId ?? pair[0]
+    );
+    const receiverId = Number(
+      pair.receiverId ?? pair.participantBId ?? pair.excludedParticipantId ?? pair[1]
+    );
+    if (!giverId || !receiverId) {
+      continue;
+    }
+    if (!blockedRecipients.has(giverId)) {
+      blockedRecipients.set(giverId, new Set([giverId]));
+    }
+    blockedRecipients.get(giverId).add(receiverId);
+  }
+
+  const allowedRecipients = new Map();
+  for (const participant of participantList) {
+    const blocked = blockedRecipients.get(participant.id) || new Set([participant.id]);
+    const allowed = shuffleArray(
+      participants.filter((candidate) => !blocked.has(candidate.id))
+    );
+    if (allowed.length === 0) {
+      throw new Error(
+        'Impossible de générer un tirage respectant les couples exclus.'
+      );
+    }
+    allowedRecipients.set(participant.id, allowed);
+  }
+
+  const assignments = [];
+  const usedReceivers = new Set();
+
+  function backtrack(index) {
+    if (index >= participantList.length) {
+      return true;
+    }
+
+    const giver = participantList[index];
+    const candidates = allowedRecipients.get(giver.id) || [];
+
+    for (const candidate of candidates) {
+      if (usedReceivers.has(candidate.id)) {
+        continue;
+      }
+      assignments.push({ giver, receiver: candidate });
+      usedReceivers.add(candidate.id);
+      if (backtrack(index + 1)) {
+        return true;
+      }
+      assignments.pop();
+      usedReceivers.delete(candidate.id);
+    }
+
+    return false;
+  }
+
+  if (!backtrack(0)) {
+    throw new Error(
+      'Impossible de générer un tirage respectant les couples exclus.'
+    );
+  }
+
   return assignments;
 }
 
@@ -800,7 +1055,31 @@ async function triggerDraw(req, res) {
     return sendBadRequest(res, 'Ajoutez au moins deux participants avant de lancer le tirage');
   }
 
-  const assignments = buildAssignments(participants);
+  const exclusionRows = await querySql(
+    `SELECT participant_a_id as participantAId, participant_b_id as participantBId
+     FROM participant_exclusions WHERE event_id = ?`,
+    [eventId]
+  );
+  const exclusionPairs = [];
+  for (const row of exclusionRows) {
+    if (!row.participantAId || !row.participantBId) {
+      continue;
+    }
+    exclusionPairs.push({ giverId: row.participantAId, receiverId: row.participantBId });
+    exclusionPairs.push({ giverId: row.participantBId, receiverId: row.participantAId });
+  }
+
+  let assignments;
+  try {
+    assignments = buildAssignments(participants, exclusionPairs);
+  } catch (error) {
+    return sendBadRequest(
+      res,
+      error instanceof Error
+        ? error.message
+        : 'Impossible de générer un tirage respectant les couples exclus.'
+    );
+  }
   const now = nowDateTime();
   const summary = [];
 
