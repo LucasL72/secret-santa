@@ -389,6 +389,7 @@ function createApp() {
     listen,
     get: (routePath, ...handlers) => addRoute('GET', routePath, handlers),
     post: (routePath, ...handlers) => addRoute('POST', routePath, handlers),
+    delete: (routePath, ...handlers) => addRoute('DELETE', routePath, handlers),
   };
 }
 
@@ -910,6 +911,175 @@ async function resendNotification(req, res) {
   }
 }
 
+async function listEvents(req, res) {
+  const events = await querySql(
+    `SELECT
+       e.id,
+       e.owner_id as ownerId,
+       e.name,
+       e.description,
+       e.event_date as eventDate,
+       e.budget,
+       e.location,
+       e.draw_generated as drawGenerated,
+       e.created_at as createdAt,
+       COUNT(p.id) as participantCount,
+       SUM(CASE WHEN p.email_status = 'sent' THEN 1 ELSE 0 END) as sentCount,
+       SUM(CASE WHEN p.email_status = 'failed' THEN 1 ELSE 0 END) as failedCount,
+       SUM(CASE WHEN p.email_status = 'pending' THEN 1 ELSE 0 END) as pendingCount
+     FROM events e
+     LEFT JOIN participants p ON p.event_id = e.id
+     WHERE e.owner_id = ?
+     GROUP BY e.id
+     ORDER BY e.created_at DESC`,
+    [req.user.userId]
+  );
+
+  const normalizedEvents = events
+    .filter((event) => event.ownerId === req.user.userId)
+    .map((event) => ({
+      id: event.id,
+      name: event.name,
+      description: event.description,
+      eventDate: toIsoString(event.eventDate),
+      budget: event.budget,
+      location: event.location,
+      drawGenerated: Boolean(event.drawGenerated),
+      createdAt: toIsoString(event.createdAt),
+      participants: {
+        total: Number(event.participantCount || 0),
+        sent: Number(event.sentCount || 0),
+        failed: Number(event.failedCount || 0),
+        pending: Number(event.pendingCount || 0),
+      },
+    }));
+
+  respondJson(res, 200, { events: normalizedEvents });
+}
+
+async function deleteEvent(req, res) {
+  const eventId = Number(req.params.id);
+  if (!eventId) {
+    return sendBadRequest(res, 'Identifiant évènement invalide');
+  }
+  const event = await getEventForOwner(eventId, req.user.userId);
+  if (!event) {
+    return sendNotFound(res, "Évènement introuvable");
+  }
+  await executeSql('DELETE FROM events WHERE id = ?', [eventId]);
+  res.statusCode = 204;
+  res.end();
+}
+
+async function remindEventNotifications(req, res) {
+  const eventId = Number(req.params.id);
+  if (!eventId) {
+    return sendBadRequest(res, 'Identifiant évènement invalide');
+  }
+  const event = await getEventForOwner(eventId, req.user.userId);
+  if (!event) {
+    return sendNotFound(res, "Évènement introuvable");
+  }
+  if (!event.drawGenerated) {
+    return sendBadRequest(
+      res,
+      "Le tirage n'a pas encore été effectué pour cet évènement."
+    );
+  }
+
+  const participants = (
+    await querySql(
+      `SELECT id, name, email, email_status as emailStatus, email_error as emailError,
+              email_sent_at as emailSentAt, created_at as createdAt,
+              assigned_recipient_id as assignedRecipientId
+       FROM participants
+       WHERE event_id = ?
+       ORDER BY created_at ASC`,
+      [eventId]
+    )
+  ).map(normalizeParticipantRow);
+
+  if (participants.length === 0) {
+    return sendBadRequest(
+      res,
+      "Aucun participant n'est enregistré pour cet évènement."
+    );
+  }
+
+  const participantsById = new Map(
+    participants.map((participant) => [participant.id, participant])
+  );
+
+  const targets = participants.filter(
+    (participant) =>
+      participant.assignedRecipientId && participant.emailStatus !== 'sent'
+  );
+
+  if (targets.length === 0) {
+    return respondJson(res, 200, {
+      event: { id: event.id, name: event.name },
+      results: { total: 0, sent: 0, failed: 0 },
+      message: 'Tous les participants ont déjà reçu leur notification.',
+    });
+  }
+
+  let sentCount = 0;
+  let failedCount = 0;
+  const details = [];
+
+  for (const participant of targets) {
+    const recipient = participantsById.get(participant.assignedRecipientId);
+    if (!recipient) {
+      failedCount += 1;
+      details.push({
+        participantId: participant.id,
+        status: 'failed',
+        error: 'Destinataire introuvable pour ce participant.',
+      });
+      continue;
+    }
+
+    const message = `Bonjour ${participant.name},\n\nVous offrirez un cadeau à ${recipient.name} (${recipient.email}).\nBonne préparation !`;
+    const sentAt = nowDateTime();
+    try {
+      await sendEmail(participant.email, EMAIL_SUBJECT, message);
+      await executeSql(
+        `UPDATE participants
+         SET email_status = 'sent', email_error = NULL, email_sent_at = ?
+         WHERE id = ? AND event_id = ?`,
+        [sentAt, participant.id, eventId]
+      );
+      sentCount += 1;
+      details.push({
+        participantId: participant.id,
+        status: 'sent',
+        sentAt: toIsoString(sentAt),
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      await executeSql(
+        `UPDATE participants
+         SET email_status = 'failed', email_error = ?, email_sent_at = ?
+         WHERE id = ? AND event_id = ?`,
+        [errorMessage, sentAt, participant.id, eventId]
+      );
+      failedCount += 1;
+      details.push({
+        participantId: participant.id,
+        status: 'failed',
+        error: errorMessage,
+        sentAt: toIsoString(sentAt),
+      });
+    }
+  }
+
+  respondJson(res, 200, {
+    event: { id: event.id, name: event.name },
+    results: { total: targets.length, sent: sentCount, failed: failedCount },
+    details,
+  });
+}
+
 // ---- Application bootstrap ----------------------------------------------
 const app = createApp();
 app.use(jsonBodyParser);
@@ -917,6 +1087,7 @@ app.use(jsonBodyParser);
 app.post('/api/auth/register', (req, res) => registerUser(req, res));
 app.post('/api/auth/login', (req, res) => loginUser(req, res));
 app.post('/api/events', authMiddleware, (req, res) => createEvent(req, res));
+app.get('/api/events', authMiddleware, (req, res) => listEvents(req, res));
 app.post('/api/events/:id/draw', authMiddleware, (req, res) => triggerDraw(req, res));
 app.get('/api/events/:id/status', authMiddleware, (req, res) => getEventStatus(req, res));
 app.get('/api/events/:id/notifications', authMiddleware, (req, res) =>
@@ -930,6 +1101,12 @@ app.patch(
 app.post('/api/events/:id/notifications/resend', authMiddleware, (req, res) =>
   resendNotification(req, res)
 );
+app.post(
+  '/api/events/:id/notifications/remind',
+  authMiddleware,
+  (req, res) => remindEventNotifications(req, res)
+);
+app.delete('/api/events/:id', authMiddleware, (req, res) => deleteEvent(req, res));
 
 async function startServer() {
   try {

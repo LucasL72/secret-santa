@@ -58,7 +58,7 @@ const testimonials = [
   },
 ];
 
-function Home({ onGetStarted = () => {} }) {
+function Home({ onGetStarted = () => {}, onViewEvents }) {
   return (
     <section className="home-view py-5">
       <div className="container">
@@ -81,6 +81,15 @@ function Home({ onGetStarted = () => {} }) {
               <button type="button" onClick={onGetStarted} className="btn btn-primary">
                 Démarrer l’assistant
               </button>
+              {typeof onViewEvents === 'function' && (
+                <button
+                  type="button"
+                  onClick={onViewEvents}
+                  className="btn btn-outline-secondary"
+                >
+                  Mes évènements
+                </button>
+              )}
               <div className="d-flex align-items-center gap-2 text-muted">
                 <span aria-hidden="true">🎁</span>
                 <span>Préparez un Noël inoubliable</span>

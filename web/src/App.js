@@ -7,6 +7,7 @@ import {
   setAuthToken as setApiAuthToken,
 } from './services/api';
 import EventDashboard from './pages/EventDashboard/EventDashboard';
+import EventList from './pages/EventList/EventList';
 
 const THEME_STORAGE_KEY = 'ssfl-theme-preference';
 
@@ -51,6 +52,7 @@ function App() {
       goAuth: () => setView('auth'),
       goWizard: () => setView('wizard'),
       goConfirmation: () => setView('confirmation'),
+      goEvents: () => setView('events'),
     }),
     []
   );
@@ -175,6 +177,7 @@ function App() {
           authToken={authToken}
           onCancel={navigation.goHome}
           onComplete={handleEventComplete}
+          onViewEvents={authToken ? navigation.goEvents : undefined}
         />
       );
       break;
@@ -189,6 +192,18 @@ function App() {
         />
       );
       break;
+    case 'events':
+      content = (
+        <EventList
+          authToken={authToken}
+          onBackHome={navigation.goHome}
+          onCreateEvent={() => {
+            setEventSummary(null);
+            navigation.goWizard();
+          }}
+        />
+      );
+      break;
     case 'home':
     default:
       content = (
@@ -200,6 +215,7 @@ function App() {
               navigation.goAuth();
             }
           }}
+          onViewEvents={creator || authToken ? navigation.goEvents : undefined}
         />
       );
       break;
@@ -223,6 +239,15 @@ function App() {
             >
               Accueil
             </button>
+            {authToken && (
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={navigation.goEvents}
+              >
+                Mes évènements
+              </button>
+            )}
             {creator ? (
               <>
                 <span className="text-muted" aria-label="Utilisateur connecté">
