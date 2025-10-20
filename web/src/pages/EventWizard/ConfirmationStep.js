@@ -1,11 +1,20 @@
 function ConfirmationStep({
   details,
   participants,
+  exclusions = [],
   onBack = () => {},
   onConfirm = () => {},
   loading,
   error,
 }) {
+  const resolveParticipantLabel = (email) => {
+    const participant = participants.find((item) => item.email === email);
+    if (!participant) {
+      return email;
+    }
+    return `${participant.name} — ${participant.email}`;
+  };
+
   return (
     <div className="confirmation-step d-flex flex-column gap-4">
       <header>
@@ -43,6 +52,25 @@ function ConfirmationStep({
           ))}
         </ul>
       </section>
+      {exclusions.length > 0 && (
+        <section>
+          <h3 className="fs-5 mb-3">Couples exclus</h3>
+          <ul className="list-group">
+            {exclusions.map((pair) => {
+              const key = [pair.participantA, pair.participantB]
+                .map((email) => email || '')
+                .sort()
+                .join('::');
+              return (
+                <li className="list-group-item" key={key}>
+                  {resolveParticipantLabel(pair.participantA)} ⇄{' '}
+                  {resolveParticipantLabel(pair.participantB)}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
       {error && (
         <div className="alert" role="alert">
           {error}
