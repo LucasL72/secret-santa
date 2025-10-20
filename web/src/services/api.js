@@ -84,6 +84,22 @@ export async function createEvent(eventData, token) {
   });
 }
 
+export async function updateEventDetails(eventId, eventData, token) {
+  return request(`/events/${eventId}`, {
+    method: 'PATCH',
+    body: eventData,
+    authToken: token,
+  });
+}
+
+export async function updateEventParticipants(eventId, participants, token) {
+  return request(`/events/${eventId}/participants`, {
+    method: 'PUT',
+    body: { participants },
+    authToken: token,
+  });
+}
+
 export async function fetchEvents(token) {
   return request('/events', {
     method: 'GET',
