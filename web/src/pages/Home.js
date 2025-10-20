@@ -16,6 +16,48 @@ const steps = [
   },
 ];
 
+const benefits = [
+  {
+    icon: '⏱️',
+    title: 'Gain de temps',
+    description:
+      'En quelques minutes, vos invitations sont prêtes et vos participants informés des règles.',
+  },
+  {
+    icon: '💌',
+    title: 'Invitations personnalisées',
+    description:
+      'Chaque membre reçoit un message adapté avec son tirage et des rappels automatiques.',
+  },
+  {
+    icon: '📊',
+    title: 'Suivi simplifié',
+    description:
+      'Visualisez qui a accepté, relancez les retardataires et gardez la surprise intacte.',
+  },
+];
+
+const testimonials = [
+  {
+    quote:
+      'La plateforme a fluidifié nos échanges et tout le monde a reçu son cadeau à temps. Même les plus distraits se sont laissés guider !',
+    author: 'Camille',
+    role: 'Organisatrice de la famille Bernard',
+  },
+  {
+    quote:
+      'On a adoré les invitations personnalisées. Les rappels automatiques ont sauvé notre réveillon.',
+    author: 'Nicolas',
+    role: 'Papa de trois lutins',
+  },
+  {
+    quote:
+      'Un outil intuitif et chaleureux : on a pu se concentrer sur les surprises plutôt que sur la logistique.',
+    author: 'Sophie',
+    role: 'Tante coordinatrice',
+  },
+];
+
 function Home({ onGetStarted = () => {} }) {
   return (
     <section className="home-view py-5">
@@ -80,17 +122,46 @@ function Home({ onGetStarted = () => {} }) {
           </div>
         </div>
         <div className="mt-5">
-          <div className="card shadow-lg">
-            <div className="card-body">
-              <h2 className="fs-3 mb-2">Tutoriel détaillé</h2>
-              <ol className="timeline mb-0">
-                {steps.map((step) => (
-                  <li key={`${step.title}-timeline`}>
-                    <h3 className="fs-5 mb-1">{step.title}</h3>
-                    <p className="text-muted mb-0">{step.description}</p>
-                  </li>
-                ))}
-              </ol>
+          <div className="card shadow-lg testimonial-section overflow-hidden">
+            <div className="card-body p-4 p-lg-5">
+              <div className="row g-4 align-items-center">
+                <div className="col-lg-5">
+                  <h2 className="fs-3 mb-3">Ils l'ont adopté en famille</h2>
+                  <p className="text-muted mb-4">
+                    Des parents organisés aux cousins dispersés, tout le monde trouve sa
+                    place grâce à Secret Santa Family Link. Inspirez-vous de leurs retours
+                    pour créer, vous aussi, un moment magique.
+                  </p>
+                  <ul className="list-unstyled feature-list mb-0">
+                    {benefits.map((benefit) => (
+                      <li key={benefit.title} className="d-flex gap-3">
+                        <span className="feature-icon" aria-hidden="true">
+                          {benefit.icon}
+                        </span>
+                        <div>
+                          <h3 className="fs-6 mb-1">{benefit.title}</h3>
+                          <p className="text-muted mb-0">{benefit.description}</p>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="col-lg-7">
+                  <div className="testimonial-grid">
+                    {testimonials.map((testimonial) => (
+                      <figure className="testimonial-card" key={testimonial.author}>
+                        <blockquote className="testimonial-quote">
+                          « {testimonial.quote} »
+                        </blockquote>
+                        <figcaption className="testimonial-author">
+                          <span className="fw-semibold">{testimonial.author}</span>
+                          <span className="text-muted">{testimonial.role}</span>
+                        </figcaption>
+                      </figure>
+                    ))}
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
