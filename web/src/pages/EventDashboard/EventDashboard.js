@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  acknowledgeNotification as acknowledgeNotificationRequest,
   fetchNotifications,
+  resendNotification as resendNotificationRequest,
   triggerDraw as triggerEventDraw,
   updateEventDetails as updateEventDetailsRequest,
   updateEventParticipants as updateEventParticipantsRequest,
@@ -25,8 +27,17 @@ const getInitialShareState = () => ({
   error: '',
 });
 
+const defaultNotificationActionState = Object.freeze({
+  acknowledging: false,
+  resending: false,
+  message: '',
+  error: '',
+});
+
 const translateNotificationStatus = (status) => {
   switch (status) {
+    case 'read':
+      return 'Lu';
     case 'sent':
       return 'Envoyé';
     case 'failed':
@@ -128,6 +139,8 @@ function EventDashboard({
   const [notificationsState, setNotificationsState] = useState(
     getInitialNotificationsState
   );
+  const [notificationsFilter, setNotificationsFilter] = useState('all');
+  const [notificationActions, setNotificationActions] = useState({});
   const [shareState, setShareState] = useState(getInitialShareState);
   const [isEditingDetails, setIsEditingDetails] = useState(false);
   const [detailsForm, setDetailsForm] = useState(() =>
@@ -160,6 +173,30 @@ function EventDashboard({
       ? currentEvent.participants
       : [];
   }, [currentEvent?.participants]);
+
+  const filteredNotifications = useMemo(() => {
+    const list = Array.isArray(notificationsState.list)
+      ? notificationsState.list
+      : [];
+    switch (notificationsFilter) {
+      case 'unread':
+        return list.filter((notification) => notification.emailStatus !== 'read');
+      case 'sent':
+      case 'failed':
+      case 'pending':
+      case 'read':
+        return list.filter(
+          (notification) => notification.emailStatus === notificationsFilter
+        );
+      case 'all':
+      default:
+        return list;
+    }
+  }, [notificationsFilter, notificationsState.list]);
+
+  const hasNotifications = useMemo(() => {
+    return Array.isArray(notificationsState.list) && notificationsState.list.length > 0;
+  }, [notificationsState.list]);
 
   useEffect(() => {
     setCurrentEvent(eventSummary || null);
@@ -237,6 +274,52 @@ function EventDashboard({
       });
     }
   }, [authToken, eventId]);
+
+  const setNotificationActionState = useCallback((notificationId, partialState) => {
+    setNotificationActions((previous) => {
+      const current =
+        previous[notificationId] ||
+        {
+          acknowledging: false,
+          resending: false,
+          message: '',
+          error: '',
+        };
+      const next = { ...current, ...partialState };
+      if (
+        !next.acknowledging &&
+        !next.resending &&
+        !next.message &&
+        !next.error
+      ) {
+        const { [notificationId]: _removed, ...rest } = previous;
+        return rest;
+      }
+      return {
+        ...previous,
+        [notificationId]: next,
+      };
+    });
+  }, []);
+
+  const updateNotificationInState = useCallback((notificationId, updater) => {
+    setNotificationsState((previous) => {
+      if (!Array.isArray(previous.list)) {
+        return previous;
+      }
+      const nextList = previous.list.map((notification) => {
+        if (notification.id !== notificationId) {
+          return notification;
+        }
+        const patch = typeof updater === 'function' ? updater(notification) : updater;
+        return { ...notification, ...patch };
+      });
+      return {
+        ...previous,
+        list: nextList,
+      };
+    });
+  }, []);
 
   const handleDetailsFieldChange = (event) => {
     const { name, value } = event.target;
@@ -646,6 +729,124 @@ function EventDashboard({
     loadNotifications();
   }, [loadNotifications]);
 
+  const handleMarkNotificationAsRead = useCallback(
+    async (notificationId) => {
+      if (!notificationId) {
+        return;
+      }
+      setNotificationActionState(notificationId, {
+        acknowledging: true,
+        message: '',
+        error: '',
+      });
+      if (!eventId) {
+        setNotificationActionState(notificationId, {
+          acknowledging: false,
+          error: "Identifiant de l’évènement introuvable.",
+        });
+        return;
+      }
+      if (!authToken) {
+        setNotificationActionState(notificationId, {
+          acknowledging: false,
+          error: 'Veuillez vous reconnecter pour mettre à jour la notification.',
+        });
+        return;
+      }
+      try {
+        await acknowledgeNotificationRequest(eventId, notificationId, authToken);
+        updateNotificationInState(notificationId, { emailStatus: 'read' });
+        await loadNotifications();
+        setNotificationActionState(notificationId, {
+          acknowledging: false,
+          message: 'Notification marquée comme lue.',
+          error: '',
+        });
+      } catch (error) {
+        setNotificationActionState(notificationId, {
+          acknowledging: false,
+          error:
+            error?.message ||
+            "Impossible de mettre à jour le statut de la notification.",
+        });
+      }
+    },
+    [
+      authToken,
+      eventId,
+      loadNotifications,
+      setNotificationActionState,
+      updateNotificationInState,
+    ]
+  );
+
+  const handleResendNotification = useCallback(
+    async (notification) => {
+      if (!notification?.id) {
+        return;
+      }
+      const notificationId = notification.id;
+      setNotificationActionState(notificationId, {
+        resending: true,
+        message: '',
+        error: '',
+      });
+      if (!eventId) {
+        setNotificationActionState(notificationId, {
+          resending: false,
+          error: "Identifiant de l’évènement introuvable.",
+        });
+        return;
+      }
+      if (!authToken) {
+        setNotificationActionState(notificationId, {
+          resending: false,
+          error: 'Veuillez vous reconnecter pour relancer la notification.',
+        });
+        return;
+      }
+      if (!notification.email) {
+        setNotificationActionState(notificationId, {
+          resending: false,
+          error: 'Adresse email du participant introuvable.',
+        });
+        return;
+      }
+      try {
+        const response = await resendNotificationRequest(
+          eventId,
+          notification.email,
+          authToken
+        );
+        const sentAt = response?.notification?.sentAt || null;
+        updateNotificationInState(notificationId, {
+          emailStatus: 'sent',
+          emailError: '',
+          emailSentAt: sentAt,
+        });
+        await loadNotifications();
+        setNotificationActionState(notificationId, {
+          resending: false,
+          message: 'Notification renvoyée avec succès.',
+          error: '',
+        });
+      } catch (error) {
+        setNotificationActionState(notificationId, {
+          resending: false,
+          error:
+            error?.message || "Impossible de renvoyer la notification.",
+        });
+      }
+    },
+    [
+      authToken,
+      eventId,
+      loadNotifications,
+      setNotificationActionState,
+      updateNotificationInState,
+    ]
+  );
+
   const handleShareEvent = useCallback(async () => {
     if (!currentEvent) {
       setShareState({
@@ -712,6 +913,8 @@ function EventDashboard({
     setDrawState(getInitialDrawState());
     setNotificationsState(getInitialNotificationsState());
     setShareState(getInitialShareState());
+    setNotificationsFilter('all');
+    setNotificationActions({});
   }, [eventId]);
 
   return (
@@ -1128,51 +1331,127 @@ function EventDashboard({
               {notificationsState.loading && (
                 <p className="text-muted mt-3 mb-0">Chargement des notifications…</p>
               )}
-              {notificationsState.list && notificationsState.list.length > 0 && (
+              {hasNotifications && (
                 <div className="mt-3">
-                  <h3 className="fs-6 mb-2">Historique des envois</h3>
-                  <ul className="list-group">
-                    {notificationsState.list.map((notification) => (
-                      <li
-                        key={notification.id}
-                        className="list-group-item d-flex justify-content-between align-items-start gap-3"
+                  <div className="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-2 mb-2">
+                    <h3 className="fs-6 mb-0">Historique des envois</h3>
+                    <label className="d-flex align-items-center gap-2 mb-0">
+                      <span className="text-muted small">Filtrer</span>
+                      <select
+                        className="form-select form-select-sm w-auto"
+                        value={notificationsFilter}
+                        onChange={(event) => setNotificationsFilter(event.target.value)}
+                        disabled={notificationsState.loading}
                       >
-                        <div className="flex-grow-1">
-                          <div className="fw-semibold">{notification.name}</div>
-                          <div className="text-muted small">{notification.email}</div>
-                        </div>
-                        <div className="text-end">
-                          <span
-                            className={`badge ${
-                              notification.emailStatus === 'sent'
-                                ? 'bg-success'
-                                : notification.emailStatus === 'failed'
-                                  ? 'bg-danger'
-                                  : 'bg-secondary'
-                            }`}
+                        <option value="all">Toutes</option>
+                        <option value="unread">Non lues</option>
+                        <option value="sent">Envoyées</option>
+                        <option value="failed">Échecs</option>
+                        <option value="pending">En attente</option>
+                        <option value="read">Lues</option>
+                      </select>
+                    </label>
+                  </div>
+                  {filteredNotifications.length > 0 ? (
+                    <ul className="list-group">
+                      {filteredNotifications.map((notification) => {
+                        const actionState =
+                          notificationActions[notification.id] ||
+                          defaultNotificationActionState;
+                        const canMarkAsRead = notification.emailStatus !== 'read';
+                        const canResend = Boolean(notification.assignedRecipientId);
+                        return (
+                          <li
+                            key={notification.id}
+                            className="list-group-item d-flex justify-content-between align-items-start gap-3"
                           >
-                            {translateNotificationStatus(notification.emailStatus)}
-                          </span>
-                          {notification.emailSentAt && (
-                            <div className="text-muted small mt-1">
-                              {formatDateTime(notification.emailSentAt)}
+                            <div className="flex-grow-1">
+                              <div className="fw-semibold">{notification.name}</div>
+                              <div className="text-muted small">{notification.email}</div>
+                              {!notification.assignedRecipientId && (
+                                <div className="text-muted small mt-1">
+                                  Tirage non réalisé pour ce participant.
+                                </div>
+                              )}
                             </div>
-                          )}
-                          {notification.emailError && (
-                            <div className="text-danger small mt-1">
-                              {notification.emailError}
+                            <div className="text-end">
+                              <span
+                                className={`badge ${
+                                  notification.emailStatus === 'sent'
+                                    ? 'bg-success'
+                                    : notification.emailStatus === 'failed'
+                                      ? 'bg-danger'
+                                      : notification.emailStatus === 'read'
+                                        ? 'bg-primary'
+                                        : 'bg-secondary'
+                                }`}
+                              >
+                                {translateNotificationStatus(notification.emailStatus)}
+                              </span>
+                              {notification.emailSentAt && (
+                                <div className="text-muted small mt-1">
+                                  {formatDateTime(notification.emailSentAt)}
+                                </div>
+                              )}
+                              {notification.emailError && (
+                                <div className="text-danger small mt-1">
+                                  {notification.emailError}
+                                </div>
+                              )}
+                              <div className="d-flex flex-wrap justify-content-end gap-2 mt-2">
+                                <button
+                                  type="button"
+                                  className="btn btn-sm btn-outline-secondary"
+                                  onClick={() => handleMarkNotificationAsRead(notification.id)}
+                                  disabled={
+                                    !canMarkAsRead ||
+                                    actionState.acknowledging ||
+                                    notificationsState.loading
+                                  }
+                                >
+                                  {actionState.acknowledging
+                                    ? 'Marquage…'
+                                    : 'Marquer comme lu'}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-sm btn-outline-primary"
+                                  onClick={() => handleResendNotification(notification)}
+                                  disabled={
+                                    !canResend ||
+                                    actionState.resending ||
+                                    notificationsState.loading
+                                  }
+                                >
+                                  {actionState.resending ? 'Renvoi…' : 'Relancer'}
+                                </button>
+                              </div>
+                              {actionState.error && (
+                                <div className="text-danger small mt-2">
+                                  {actionState.error}
+                                </div>
+                              )}
+                              {actionState.message && (
+                                <div className="text-success small mt-2">
+                                  {actionState.message}
+                                </div>
+                              )}
                             </div>
-                          )}
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : (
+                    <p className="text-muted mb-0">
+                      Aucune notification ne correspond au filtre sélectionné.
+                    </p>
+                  )}
                 </div>
               )}
               {notificationsState.loaded &&
                 !notificationsState.loading &&
                 !notificationsState.error &&
-                (!notificationsState.list || notificationsState.list.length === 0) && (
+                !hasNotifications && (
                   <p className="text-muted mt-3 mb-0">
                     Aucun email n’a encore été envoyé.
                   </p>
