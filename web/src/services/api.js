@@ -84,6 +84,20 @@ export async function createEvent(eventData, token) {
   });
 }
 
+export async function fetchEvents(token) {
+  return request('/events', {
+    method: 'GET',
+    authToken: token,
+  });
+}
+
+export async function fetchEventStatus(eventId, token) {
+  return request(`/events/${eventId}/status`, {
+    method: 'GET',
+    authToken: token,
+  });
+}
+
 export async function fetchNotifications(eventId, token) {
   return request(`/events/${eventId}/notifications`, {
     method: 'GET',
@@ -110,6 +124,20 @@ export async function resendNotification(eventId, participantEmail, token) {
 export async function triggerDraw(eventId, token) {
   return request(`/events/${eventId}/draw`, {
     method: 'POST',
+    authToken: token,
+  });
+}
+
+export async function remindEventNotifications(eventId, token) {
+  return request(`/events/${eventId}/notifications/remind`, {
+    method: 'POST',
+    authToken: token,
+  });
+}
+
+export async function deleteEvent(eventId, token) {
+  return request(`/events/${eventId}`, {
+    method: 'DELETE',
     authToken: token,
   });
 }

@@ -18,7 +18,13 @@ function createEmptyServerErrors() {
   };
 }
 
-function EventWizard({ creator, authToken, onCancel = () => {}, onComplete }) {
+function EventWizard({
+  creator,
+  authToken,
+  onCancel = () => {},
+  onComplete,
+  onViewEvents,
+}) {
   const steps = useMemo(
     () => [
       { id: 'details', label: 'Paramètres' },
@@ -186,6 +192,17 @@ function EventWizard({ creator, authToken, onCancel = () => {}, onComplete }) {
             Configurez votre Secret Santa étape par étape. Les informations sont
             sauvegardées à chaque progression.
           </p>
+          {typeof onViewEvents === 'function' && (
+            <div className="mt-3">
+              <button
+                type="button"
+                className="btn btn-outline-secondary"
+                onClick={onViewEvents}
+              >
+                Voir mes évènements
+              </button>
+            </div>
+          )}
         </header>
         <ol className="wizard-steps mb-4" role="list">
           {steps.map((step, index) => (
